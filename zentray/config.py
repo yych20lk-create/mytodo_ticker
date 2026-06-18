@@ -3,6 +3,16 @@ import sys
 from pathlib import Path
 from platformdirs import user_data_dir
 
+# 自动从项目根目录加载 .env 环境变量
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                os.environ.setdefault(key.strip(), val.strip())
+
 APP_NAME = "ZenTray"
 APP_AUTHOR = "Zen-Geek"
 
