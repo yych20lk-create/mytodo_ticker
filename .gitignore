@@ -22,3 +22,21 @@ var/
 .venv
 venv/
 ENV/
+
+# PyInstaller 打包产物
+build/
+dist/
+*.spec.bak
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 用户本地数据（不提交）
+*.local.json

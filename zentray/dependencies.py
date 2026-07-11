@@ -2,10 +2,13 @@
 """
 依赖注入模块配置。
 
-使用自定义 DI 容器（zentray/di.py），API 与 injector 库兼容。
-当 pip 环境就绪后，可将 import 切换为标准的 injector 库。
+优先级：标准 injector 库 > 自定义 di.py 回退。
+当 pip install zentray 时，injector 作为依赖自动安装。
 """
-from zentray.di import Module, provider, singleton, Injector
+try:
+    from injector import Module, provider, singleton, Injector
+except ImportError:
+    from zentray.di import Module, provider, singleton, Injector
 from zentray.core.repository import TaskRepository, PeriodicTemplateRepository
 from zentray.repositories.file_repository import FileTaskRepository
 from zentray.repositories.file_periodic_repository import FilePeriodicTemplateRepository
