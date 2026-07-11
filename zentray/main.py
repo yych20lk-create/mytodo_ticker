@@ -11,7 +11,7 @@ if sys.platform.startswith('linux'):
 
 from PySide6.QtWidgets import QApplication
 from zentray.dependencies import injector, init_tray_controller
-from zentray.core.repository import TaskRepository
+from zentray.core.repository import TaskRepository, PeriodicTemplateRepository
 from zentray.services.system_utils import SingleInstanceGuard, HotkeyListener
 from zentray.ui.overlay import QuickAddOverlay
 from zentray.workers.watcher import WatcherWorker
@@ -43,9 +43,10 @@ def main():
     hotkey.triggered.connect(overlay.show_center)
     hotkey.start()
 
-    # 6. 启动后台巡检 worker（注入 TaskRepository）
+    # 6. 启动后台巡检 worker（注入 Repository）
     task_repo = injector.get(TaskRepository)
-    watcher = WatcherWorker(task_repo)
+    template_repo = injector.get(PeriodicTemplateRepository)
+    watcher = WatcherWorker(task_repo, template_repo)
     watcher.tasks_updated.connect(controller.reload_data)
     watcher.start()
 

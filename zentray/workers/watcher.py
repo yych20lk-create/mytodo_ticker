@@ -2,8 +2,9 @@ import datetime
 import uuid
 import time
 from PySide6.QtCore import QThread, Signal
+from zentray.core.repository import TaskRepository, PeriodicTemplateRepository
 from zentray.core.models import Task
-from zentray.core.storage import Storage
+
 
 class WatcherWorker(QThread):
     """
@@ -13,9 +14,11 @@ class WatcherWorker(QThread):
     tasks_updated = Signal()       # 通知 UI 层数据已在后台更新，需要重新读取和轮播
     task_overdue = Signal(object)  # 将被惩罚的 Task 对象抛给主线程去弹系统警告框
 
-    def __init__(self):
+    def __init__(self, task_repo: TaskRepository, template_repo: PeriodicTemplateRepository = None):
         super().__init__()
         self.is_running = True
+        self.task_repo = task_repo
+        self.template_repo = template_repo
 
     def run(self):
         while self.is_running:
@@ -27,13 +30,13 @@ class WatcherWorker(QThread):
                 time.sleep(1)
 
     def _do_maintenance(self):
-        tasks = Storage.load_tasks()
-        templates = Storage.load_periodic_templates()
+        tasks = self.task_repo.find_all()
+        templates = self.template_repo.find_all() if self.template_repo else []
         today = datetime.date.today()
         today_str = today.strftime("%Y-%m-%d")
-        
+
         changed = False
-        
+
         # ==========================================
         # 1. 扫描逾期惩罚
         # ==========================================
@@ -49,8 +52,8 @@ class WatcherWorker(QThread):
                         task.deadline = (deadline_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
                         task.overdue_penalty_date = today_str
                         changed = True
-                        
-                        # 向主 UI 线程抛送拦截信号，让主线程调用系统弹窗和 WxPusher 报警
+
+                        # 向主 UI 线程抛送拦截信号
                         self.task_overdue.emit(task)
                 except ValueError:
                     pass
@@ -70,7 +73,7 @@ class WatcherWorker(QThread):
                 prefix = today.strftime("%y%m")
             else:
                 prefix = today.strftime("%y%m%d")
-                
+
             if tmpl.last_generated_period != prefix:
                 new_title = f"【{prefix}】{tmpl.base_title}"
                 new_task = Task(
@@ -81,7 +84,7 @@ class WatcherWorker(QThread):
                     priority=tmpl.priority,
                     deadline="",
                     task_type="periodic_instance",
-                    template_id=tmpl.template_id
+                    template_id=tmpl.template_id,
                 )
                 tasks.append(new_task)
                 tmpl.last_generated_period = prefix
@@ -90,11 +93,11 @@ class WatcherWorker(QThread):
 
         # 持久化落盘并通知 UI 刷新
         if changed:
-            Storage.save_tasks(tasks)
+            self.task_repo.save_all(tasks)
             self.tasks_updated.emit()
-            
-        if tmpl_changed:
-            Storage.save_periodic_templates(templates)
+
+        if tmpl_changed and self.template_repo:
+            self.template_repo.save_all(templates)
 
     def stop(self):
         self.is_running = False
