@@ -31,3 +31,15 @@ class TaskRepository(ABC):
     @abstractmethod
     def archive(self, task: Task, status: str) -> None:
         pass
+
+
+class PeriodicTemplateRepository(ABC):
+    """周期任务模板存储抽象接口"""
+
+    @abstractmethod
+    def find_all(self) -> List[PeriodicTemplate]:
+        pass
+
+    @abstractmethod
+    def save_all(self, templates: List[PeriodicTemplate]) -> None:
+        pass
