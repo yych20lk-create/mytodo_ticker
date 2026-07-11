@@ -64,31 +64,12 @@ class TrayController(QObject):
     # ==========================================
 
     def handle_action(self, action_id: str) -> None:
-        """中央事件路由"""
-        # 当前版本保留简单的 if-elif 路由
-        # Task 9 将替换为命令模式
-        if action_id == "new":
-            self._open_new_task_dialog()
-        elif action_id == "done":
-            self._mark_done()
-        elif action_id == "abandon":
-            self._abandon()
-        elif action_id == "progress":
-            self._update_progress_dialog()
-        elif action_id == "edit":
-            self._edit_current_task()
-        elif action_id == "pomodoro":
-            self.pomodoro_service.start()
-        elif action_id == "stop_pomodoro":
-            self.pomodoro_service.stop()
-        elif action_id == "extend_pomodoro":
-            self.pomodoro_service.extend()
-        elif action_id == "quit":
-            self.app.quit()
-        elif action_id.startswith("task_action_"):
-            pass  # 将在命令模式中处理
-        elif action_id.startswith("extension_"):
-            self._execute_extension(action_id)
+        """中央事件路由 —— 通过命令模式分发"""
+        from .commands import dispatch
+
+        if not dispatch(action_id, self):
+            # 未识别的命令，静默忽略
+            pass
 
     # ==========================================
     # 显示更新
@@ -142,60 +123,4 @@ class TrayController(QObject):
 
     def _on_script_log(self, log: str) -> None:
         """脚本日志回调：短暂显示在状态栏"""
-        # 截断过长的日志，只显示前 50 个字符
         self.renderer.set_text(log[:50])
-
-    # ==========================================
-    # 内部操作方法（桩实现，Task 9 完善）
-    # ==========================================
-
-    def _open_new_task_dialog(self) -> None:
-        from zentray.ui.dialogs import TaskDialog
-
-        dialog = TaskDialog()
-        if dialog.exec():
-            data = dialog.get_data()
-            self.task_service.create_task(data)
-            self._update_display()
-
-    def _mark_done(self) -> None:
-        task = self.task_service.get_current_task()
-        if task:
-            self.task_service.mark_done(task.id)
-            self._update_display()
-
-    def _abandon(self) -> None:
-        task = self.task_service.get_current_task()
-        if task:
-            self.task_service.abandon(task.id)
-            self._update_display()
-
-    def _update_progress_dialog(self) -> None:
-        from zentray.ui.dialogs import ProgressDialog
-
-        task = self.task_service.get_current_task()
-        if task:
-            dialog = ProgressDialog(task=task)
-            if dialog.exec():
-                percent, note = dialog.get_data()
-                self.task_service.update_progress(task.id, percent, note)
-                self._update_display()
-
-    def _edit_current_task(self) -> None:
-        from zentray.ui.dialogs import TaskDialog
-
-        task = self.task_service.get_current_task()
-        if task:
-            dialog = TaskDialog(task=task)
-            if dialog.exec():
-                data = dialog.get_data()
-                self.task_service.update_task(task.id, data)
-                self._update_display()
-
-    def _execute_extension(self, action_id: str) -> None:
-        """执行扩展按钮"""
-        ext_name = action_id[len("extension_"):]
-        for ext in self.extensions:
-            if ext.__class__.__name__ == ext_name:
-                ext.handle_click()
-                break
