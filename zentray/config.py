@@ -1,7 +1,19 @@
 import os
 import sys
 from pathlib import Path
-from platformdirs import user_data_dir
+
+# 跨平台用户数据目录（避免依赖 platformdirs）
+def _user_data_dir(app_name: str) -> Path:
+    """获取应用用户数据目录"""
+    if sys.platform == "linux":
+        xdg = os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
+        return Path(xdg) / app_name
+    elif sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / app_name
+    elif sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")
+        return Path(appdata) / app_name
+    return Path.home() / f".{app_name.lower()}"
 
 # 自动从项目根目录加载 .env 环境变量
 env_path = Path(__file__).parent.parent / ".env"
@@ -17,7 +29,7 @@ APP_NAME = "ZenTray"
 APP_AUTHOR = "Zen-Geek"
 
 # 跨平台标准数据目录
-DATA_DIR = Path(user_data_dir(APP_NAME, APP_AUTHOR))
+DATA_DIR = _user_data_dir(APP_NAME)
 ACTIVE_TASKS_FILE = DATA_DIR / "active_tasks.json"
 PERIODIC_TEMPLATES_FILE = DATA_DIR / "periodic_templates.json"
 ARCHIVE_DIR = DATA_DIR / "archive"
