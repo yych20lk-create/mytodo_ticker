@@ -10,10 +10,17 @@ from zentray.core.repository import TaskRepository, PeriodicTemplateRepository
 from zentray.repositories.file_repository import FileTaskRepository
 from zentray.repositories.file_periodic_repository import FilePeriodicTemplateRepository
 from zentray.config import STORAGE_BACKEND
+from zentray.core.scheduler import Scheduler
+from zentray.services.task_service import TaskService
 
 
 class AppModule(Module):
     """应用依赖注入模块配置"""
+
+    @provider
+    @singleton
+    def provide_scheduler(self) -> Scheduler:
+        return Scheduler()
 
     @provider
     @singleton
@@ -28,9 +35,18 @@ class AppModule(Module):
     def provide_template_repository(self) -> PeriodicTemplateRepository:
         return FilePeriodicTemplateRepository()
 
+    @provider
+    @singleton
+    def provide_task_service(
+        self,
+        task_repo: TaskRepository,
+        template_repo: PeriodicTemplateRepository,
+        scheduler: Scheduler,
+    ) -> TaskService:
+        return TaskService(task_repo, template_repo, scheduler)
+
     # ==========================================
     # 以下 provider 将在后续任务中逐步添加:
-    # - provide_task_service (Task 6)
     # - provide_pomodoro_service (Task 7)
     # - provide_renderer (Task 8)
     # - provide_extension_loader (Task 8)
