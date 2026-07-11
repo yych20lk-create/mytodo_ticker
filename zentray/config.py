@@ -23,13 +23,16 @@ PERIODIC_TEMPLATES_FILE = DATA_DIR / "periodic_templates.json"
 ARCHIVE_DIR = DATA_DIR / "archive"
 
 # WxPusher 默认配置
-WXPUSHER_APP_TOKEN = os.getenv("WXPUSHER_APP_TOKEN", "AT_83wUvfSiTgLS0DXzQDY1mcoQA4ykKfeF")
-WXPUSHER_UID = os.getenv("WXPUSHER_UID", "UID_InpmBp9KOuVg4C7to5K8CgfhKfRC")
+WXPUSHER_APP_TOKEN = os.getenv("WXPUSHER_APP_TOKEN")
+WXPUSHER_UID = os.getenv("WXPUSHER_UID")
 
 # LLM AI 配置 (用于 Nightly Job)
 AI_API_BASE_URL = os.getenv("AI_API_BASE_URL", "https://api.openai.com/v1")
-AI_API_KEY = os.getenv("AI_API_KEY", "")
+AI_API_KEY = os.getenv("AI_API_KEY")
 AI_MODEL_NAME = os.getenv("AI_MODEL_NAME", "gpt-4o")
+
+# 存储后端配置 (file | mysql)
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "file")
 
 # UI 与调度设置
 POLLING_INTERVAL_MS = 30000  # 托盘轮播间隔 (30秒)
@@ -38,3 +41,15 @@ HOTKEY_QUICK_ADD = "<cmd>+<alt>+t" if sys.platform == 'darwin' else "<ctrl>+<alt
 
 # 确保核心目录存在
 os.makedirs(ARCHIVE_DIR, exist_ok=True)
+
+def validate_config():
+    required_vars = {
+        "WXPUSHER_APP_TOKEN": WXPUSHER_APP_TOKEN,
+        "WXPUSHER_UID": WXPUSHER_UID,
+        "AI_API_KEY": AI_API_KEY
+    }
+    missing = [var for var, value in required_vars.items() if not value]
+    if missing:
+        error_msg = f"Configuration error: Missing required environment variables: {', '.join(missing)}"
+        print(error_msg, file=sys.stderr)
+        sys.exit(1)

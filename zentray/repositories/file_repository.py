@@ -37,6 +37,17 @@ class FileTaskRepository(TaskRepository):
         tasks = self.find_all()
         return next((t for t in tasks if t.id == task_id), None)
 
+    def save(self, task: Task) -> None:
+        """保存或更新单个任务"""
+        tasks = self.find_all()
+        for i, t in enumerate(tasks):
+            if t.id == task.id:
+                tasks[i] = task
+                self.save_all(tasks)
+                return
+        tasks.append(task)
+        self.save_all(tasks)
+
     def save_all(self, tasks: List[Task]) -> None:
         data = [t.to_dict() for t in tasks]
         self._save_json(self.active_file, data)
