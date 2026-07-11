@@ -12,6 +12,7 @@ from zentray.repositories.file_periodic_repository import FilePeriodicTemplateRe
 from zentray.config import STORAGE_BACKEND
 from zentray.core.scheduler import Scheduler
 from zentray.services.task_service import TaskService
+from zentray.services.pomodoro_service import PomodoroService
 
 
 class AppModule(Module):
@@ -45,9 +46,13 @@ class AppModule(Module):
     ) -> TaskService:
         return TaskService(task_repo, template_repo, scheduler)
 
+    @provider
+    @singleton
+    def provide_pomodoro_service(self) -> PomodoroService:
+        return PomodoroService()
+
     # ==========================================
     # 以下 provider 将在后续任务中逐步添加:
-    # - provide_pomodoro_service (Task 7)
     # - provide_renderer (Task 8)
     # - provide_extension_loader (Task 8)
     # - provide_qapplication (Task 10)
