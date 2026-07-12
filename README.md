@@ -1,95 +1,240 @@
-# ZenTray 个人禅定看板 (v3.6)
+# ZenTray 个人禅定看板 (v3.7)
 
-> 本项目已全面升维至 **跨平台架构 (Windows/macOS/Linux)**，是一款现代化的极致个人效率与专注工具。
-> - 在 **Linux (GNOME)** 环境下：采用独创的 **双进程原生桥接 (Native GTK Bridge)**，实现系统顶栏文字级原生无缝融合、状态栏自适应与完美的彩色进度圆饼图标渲染。
-> - 在 **Windows / macOS / 其他 Linux** 环境下：自动无缝回退到标准 **Qt 系统托盘模式 (Qt Standard Tray)**，提供统一且美观的系统级交互面板。
+> 跨平台（Windows / macOS / Linux）个人任务管理与专注效率工具。
+> 系统托盘常驻，番茄钟 + GTD 看板 + AI 毒舌教练，助你高效摸鱼。
+
+<p align="center">
+  <strong>📋 GTD 任务管理 &nbsp;|&nbsp; 🍅 番茄专注 &nbsp;|&nbsp; 🤖 AI 每日复盘 &nbsp;|&nbsp; 📱 移动端推送</strong>
+</p>
 
 ---
 
-## 🛠️ 环境要求与安装
+## 🚀 快速开始
 
-### 🚀 快速启动（推荐）
+### 一键安装（推荐）
 
-直接运行包装脚本，会自动安装 Python 依赖（从 `requirements.txt` 读取）并启动程序（包括本地通知服务）：
-
-#### Linux / macOS 部署：
 ```bash
-chmod +x run.sh
-./run.sh
+pip install zentray
+zentray
 ```
-*提示：脚本已配置 `nohup` 运行，进程启动后您可以直接安全地关闭终端，应用仍会在后台持续静默运行。*
 
-#### Windows 部署：
-双击运行项目根目录下的 **`run.bat`**。
-*提示：批处理脚本会在后台通过 `pythonw.exe` 独立拉起服务和主程序，无任何烦人的 Cmd 命令行黑窗口残留。*
+**无需任何配置即可启动！** 核心功能（任务管理、番茄钟、托盘轮播）开箱即用。
 
----
+### 开发模式启动
 
-## ⚠️ 跨平台注意事项与常见问题 (FAQ)
+```bash
+git clone https://github.com/zen-geek/zentray.git
+cd zentray
+pip install -e ".[dev]"
+python zentray/main.py
+```
 
-### 1. macOS 系统下「快捷键无法唤出」
-* **原因**：看板的快捷键机制基于 `pynput` 的全局监听，在 macOS 系统中，任何监听全局键鼠的程序都需要系统**辅助功能 (Accessibility) 权限**。
-* **解决办法**：
-  1. 打开 macOS 的 **系统设置** -> **隐私与安全性** -> **辅助功能**。
-  2. 在列表中添加并勾选您运行此脚本的终端软件（如 `Terminal`、`iTerm2` 或 `Visual Studio Code`）。
-  3. 重新运行 `./run.sh` 即可。
+### 启用高级功能
 
-### 2. Linux 平台下「无法切换中文输入法 (Fcitx5)」
-* **原因**：部分 Linux 发行版下的 PySide6 (Qt) 库会与系统的 Fcitx 发生输入法 ABI 冲突。
-* **解决办法**：本项目已在 `zentray/main.py` 的入口中自动注入了环境变量：
-  ```python
-  os.environ["QT_IM_MODULE"] = "ibus"
-  ```
-  该行已完美解决 Fcitx 唤出与打字问题，无需用户手动配置。
+在项目根目录创建 `.env` 文件：
 
-### 3. Windows 下「如何彻底关闭后台程序」
-* **原因**：Windows 下使用了 `pythonw` 独立运行于后台。
-* **解决办法**：
-  * 在托盘图标上右键，选择 **`❌ 退出程序`** 可安全关闭主看板（退出时会自动触发本地通知服务的关闭）。
-  * 若要手动清理，亦可直接在 cmd 中运行以下命令杀死残余进程：
-    ```cmd
-    taskkill /f /im python.exe
-    taskkill /f /im pythonw.exe
-    ```
+```env
+# 移动端推送（WxPusher）
+WXPUSHER_APP_TOKEN=your_token_here
+WXPUSHER_UID=your_uid_here
+
+# AI 夜间复盘教练
+AI_API_KEY=sk-your-key-here
+AI_API_BASE_URL=https://api.openai.com/v1
+AI_MODEL_NAME=gpt-4o
+```
 
 ---
 
-## ⚙️ 核心配置文件与参数
+## ✨ 功能特性
 
-### 1. 通讯通道配置：`../notification_service/config.json`
-在这里配置接收端凭证和激活的推送通道：
-- `PORT`: 本地服务监听端口（默认 `18330`）。
-- `ACTIVE_SENDERS`: 激活的通道列表（例如 `["wxpusher"]` 或 `["wxpusher", "dingtalk"]`）。
-- `WXPUSHER`: 包含 `WXPUSHER_APP_TOKEN` 和 `WXPUSHER_UID`。
-- `DINGTALK`: 包含 `DINGTALK_WEBHOOK_URL`。
-
-### 2. ZenTray 配置：`zentray/config.py`
-调整番茄钟时间或大模型锐评教练参数：
-- `AI_API_BASE_URL` / `AI_API_KEY`：配置大模型地址以激活“毒舌教练”。
-- `POMODORO_MINUTES`：番茄钟时长（默认 25 分钟）。
-- `HOTKEY_QUICK_ADD`：闪电添加任务的全局快捷键，macOS 默认为 `cmd+alt+t`，Windows/Linux 默认为 `ctrl+alt+t`。
+| 功能 | 说明 | 配置要求 |
+|------|------|---------|
+| 📋 **GTD 看板** | 任务创建、分类、优先级、进度追踪 | 无 |
+| 🍅 **番茄钟** | 25分钟专注计时，可延长/中止 | 无 |
+| 🔄 **周期任务** | 日/周/月自动派发 | 无 |
+| ⚡ **闪电添加** | `Ctrl+Alt+T` 全局快捷键快速录入 | 无 |
+| 📱 **移动推送** | WxPusher 通知到微信 | 需配置凭据 |
+| 🤖 **AI 复盘** | 每日 23:30 毒舌锐评 + 明日规划 | 需 API Key |
+| 🔌 **扩展系统** | 自定义状态栏脚本按钮 | 无 |
 
 ---
 
-## 📡 本地通知 API 接口
+## 🖥️ 跨平台支持
 
-任何第三方应用或脚本都可以直接向本地服务投递消息：
-* **请求方法**: `POST`
-* **请求地址**: `http://127.0.0.1:18330/send`
-* **请求体 (JSON)**:
-  ```json
-  {
-    "title": "消息标题",
-    "content": "这里是支持 **Markdown** 的正文内容"
-  }
-  ```
+| 平台 | 托盘实现 | 状态 |
+|------|---------|------|
+| **Linux (GNOME)** | 原生 GTK AppIndicator 桥接，顶栏文字滚动 + 进度饼图 | ✅ 完美 |
+| **Linux (其他)** | Qt 系统托盘回退 | ✅ 可用 |
+| **macOS** | Qt 标准菜单栏托盘 | ✅ 可用 |
+| **Windows** | Qt 系统通知区域托盘 | ✅ 可用 |
+
+### 快捷键
+
+| 系统 | 快捷键 |
+|------|--------|
+| Linux / Windows | `Ctrl + Alt + T` |
+| macOS | `Cmd + Alt + T` |
+
+> ⚠️ **macOS 用户**：首次使用需在 **系统设置 → 隐私与安全性 → 辅助功能** 中授权终端软件。
 
 ---
 
-## 📁 架构说明
-- `zentray/`: 看板核心逻辑与 PySide6 GUI 视图。
-- `../notification_service/`: 独立通道通知模块，位于与本项目平级的本地目录。
-  - `senders/`: 通道发送器（WxPusher, DingTalk 等，均继承自 `BaseSender`）。
-  - `main.py`: 本地 API 服务主入口。
-  - `client.py`: 通用推送服务的轻量 Python 客户端类 `NotificationClient`。
-- `send_daily_summary.py`: 根目录下的一键手动发送日报脚本。可在终端中通过 `python send_daily_summary.py` 直接调用发送。
+## 🏗️ 架构设计
+
+```
+main.py
+  └── DI Container (injector)
+        └── TrayController (事件协调)
+              ├── TaskService        → 任务 CRUD / 进度 / 调度
+              ├── PomodoroService    → 番茄钟计时状态
+              ├── ScriptService      → 扩展脚本执行（预留）
+              ├── TrayRenderer       → 托盘 UI 渲染
+              ├── MenuBuilder        → 右键菜单构建
+              └── ExtensionLoader    → 动态插件发现
+                    └── StatusBarExtension（脚本按钮等）
+
+    命令模式
+    ─────────
+    handle_action → dispatch() → ActionCommand.execute()
+        ├── NewTaskCommand
+        ├── DoneCommand
+        ├── PomodoroStartCommand
+        ├── ExtensionCommand
+        └── ...
+
+    存储层
+    ──────
+    TaskRepository (接口)
+        ├── FileTaskRepository      ← 当前
+        └── MySQLTaskRepository     ← 后续
+```
+
+### 核心设计原则
+
+- **依赖注入**：所有服务通过 `injector` 容器管理，松耦合可测试
+- **命令模式**：托盘菜单事件通过 `ActionCommand` 分发，易扩展
+- **接口隔离**：`TaskRepository` 抽象存储，可切换 file / mysql 后端
+- **零配置启动**：高级功能按需激活，核心功能始终可用
+
+---
+
+## 📁 项目结构
+
+```
+my_todo/
+├── pyproject.toml              # 项目元数据与依赖声明
+├── LICENSE                     # MIT License
+├── requirements.txt            # 依赖列表（兼容旧工具）
+├── zentray.spec                # PyInstaller 打包配置
+├── README.md
+│
+├── zentray/
+│   ├── main.py                 # 应用入口
+│   ├── config.py               # 配置管理（零配置友好）
+│   ├── resources.py            # 资源路径管理（dev/pyinstaller 兼容）
+│   ├── dependencies.py         # DI 容器模块配置
+│   ├── di.py                   # 轻量 DI 回退（injector 不可用时）
+│   │
+│   ├── core/
+│   │   ├── models.py           # 数据模型（Task, PeriodicTemplate）
+│   │   ├── scheduler.py        # 加权轮播调度算法
+│   │   ├── repository.py       # Repository 抽象接口
+│   │   └── storage.py          # 旧版 Storage（兼容过渡）
+│   │
+│   ├── repositories/
+│   │   ├── file_repository.py           # JSON 文件存储实现
+│   │   └── file_periodic_repository.py  # 周期模板 JSON 存储
+│   │
+│   ├── services/
+│   │   ├── task_service.py      # 任务管理服务
+│   │   ├── pomodoro_service.py  # 番茄钟服务
+│   │   ├── script_service.py    # 脚本执行服务（预留）
+│   │   ├── notification.py      # 通知客户端
+│   │   ├── ai_review.py         # AI 复盘服务
+│   │   └── system_utils.py      # 系统工具（单例锁、热键监听）
+│   │
+│   ├── ui/
+│   │   ├── controller.py        # 托盘协调者（事件路由）
+│   │   ├── renderer.py          # 托盘渲染器
+│   │   ├── menu_builder.py      # 菜单构建器
+│   │   ├── commands.py          # 命令模式事件处理
+│   │   ├── tray.py              # 跨平台托盘底层实现
+│   │   ├── dialogs.py           # UI 对话框
+│   │   ├── overlay.py           # 闪电添加浮层
+│   │   ├── linux_tray_bridge.py # Linux 原生 GTK 桥接
+│   │   └── extensions/          # 状态栏扩展系统
+│   │       ├── interface.py     # StatusBarExtension 接口
+│   │       └── loader.py        # ExtensionLoader 加载器
+│   │
+│   └── workers/
+│       ├── watcher.py           # 后台巡检（逾期惩罚 + 周期派发）
+│       └── nightly_job.py       # 夜间 AI 复盘
+│
+├── extensions/                  # 用户插件目录
+├── resources/                   # 打包资源（图标等）
+├── tests/                       # 测试套件
+│   ├── conftest.py
+│   └── unit/
+│       ├── test_task_service.py
+│       ├── test_pomodoro_service.py
+│       ├── test_repository.py
+│       └── ...
+└── docs/                        # 设计文档
+```
+
+---
+
+## 🧪 开发指南
+
+### 运行测试
+
+```bash
+pip install -e ".[dev]"
+pytest -v
+```
+
+### 代码风格
+
+```bash
+black zentray/ tests/
+```
+
+### 构建分发包
+
+```bash
+pip install pyinstaller
+pyinstaller zentray.spec
+```
+
+输出位置：
+- **Linux**: `dist/ZenTray`
+- **macOS**: `dist/ZenTray.app`
+- **Windows**: `dist/ZenTray.exe`
+
+---
+
+## 🔧 配置参考
+
+| 环境变量 | 说明 | 默认值 | 必需 |
+|---------|------|--------|------|
+| `WXPUSHER_APP_TOKEN` | 通知服务 Token | - | 否 |
+| `WXPUSHER_UID` | 通知服务 UID | - | 否 |
+| `AI_API_KEY` | AI API 密钥 | - | 否 |
+| `AI_API_BASE_URL` | AI API 地址 | `https://api.openai.com/v1` | 否 |
+| `AI_MODEL_NAME` | AI 模型名称 | `gpt-4o` | 否 |
+| `STORAGE_BACKEND` | 存储后端 (`file`/`mysql`) | `file` | 否 |
+
+---
+
+## 📄 许可证
+
+MIT License — 详见 [LICENSE](LICENSE) 文件。
+
+---
+
+## 🙏 致谢
+
+- [PySide6](https://wiki.qt.io/Qt_for_Python) — Qt for Python 官方绑定
+- [injector](https://github.com/alecthomas/injector) — Python 依赖注入框架
+- [pynput](https://github.com/moses-palmer/pynput) — 跨平台输入监听
