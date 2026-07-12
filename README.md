@@ -11,16 +11,19 @@
 
 ## 🚀 快速开始
 
-### 一键安装（推荐）
+### 下载安装包（推荐）
 
-```bash
-pip install zentray
-zentray
-```
+从 [GitHub Releases](https://github.com/zen-geek/zentray/releases) 下载对应平台的安装包：
 
-**无需任何配置即可启动！** 核心功能（任务管理、番茄钟、托盘轮播）开箱即用。
+| 平台 | 安装包 | 说明 |
+|------|--------|------|
+| **Linux** | `ZenTray-x86_64.AppImage` | 下载后 `chmod +x` 即可运行 |
+| **macOS** | `ZenTray-arm64.dmg` | 双击挂载，拖入 Applications |
+| **Windows** | `ZenTray-Setup-x64.exe` | 双击安装向导 |
 
-### 开发模式启动
+**无需任何配置即可启动！** 首次运行会出现配置向导，引导你完成可选功能（通知推送、AI 教练）的设置，所有步骤均可跳过。
+
+### 开发者安装
 
 ```bash
 git clone https://github.com/zen-geek/zentray.git
@@ -29,9 +32,9 @@ pip install -e ".[dev]"
 python zentray/main.py
 ```
 
-### 启用高级功能
+### 可选功能配置
 
-在项目根目录创建 `.env` 文件：
+首次启动时配置向导会引导设置。也可在项目目录创建 `.env` 文件：
 
 ```env
 # 移动端推送（WxPusher）
@@ -52,6 +55,7 @@ AI_MODEL_NAME=gpt-4o
 |------|------|---------|
 | 📋 **GTD 看板** | 任务创建、分类、优先级、进度追踪 | 无 |
 | 🍅 **番茄钟** | 25分钟专注计时，可延长/中止 | 无 |
+| 🧙 **配置向导** | 首次启动引导，所有高级功能可选配置 | 无 |
 | 🔄 **周期任务** | 日/周/月自动派发 | 无 |
 | ⚡ **闪电添加** | `Ctrl+Alt+T` 全局快捷键快速录入 | 无 |
 | 📱 **移动推送** | WxPusher 通知到微信 | 需配置凭据 |
@@ -203,14 +207,27 @@ black zentray/ tests/
 ### 构建分发包
 
 ```bash
+# 安装 PyInstaller
 pip install pyinstaller
+
+# 构建单文件可执行程序
 pyinstaller zentray.spec
 ```
 
-输出位置：
-- **Linux**: `dist/ZenTray`
-- **macOS**: `dist/ZenTray.app`
-- **Windows**: `dist/ZenTray.exe`
+平台特定打包：
+
+```bash
+# Linux: 构建 AppImage
+bash scripts/build_linux.sh
+
+# macOS: 构建 DMG
+bash scripts/build_macos.sh
+
+# Windows: 构建 NSIS 安装器
+scripts\build_windows.bat
+```
+
+发布时通过 GitHub Actions 自动构建，详见 `.github/workflows/build.yml`。
 
 ---
 

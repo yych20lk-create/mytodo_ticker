@@ -19,6 +19,7 @@ from zentray.workers.nightly_job import NightlyJobWorker
 from zentray.config import (
     HOTKEY_QUICK_ADD, validate_config, is_notification_enabled, get_enabled_features
 )
+from zentray.ui.setup_wizard import should_show_wizard, show_setup_wizard
 import logging_config
 import logging
 
@@ -47,7 +48,11 @@ def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
-    # 5. 通过 DI 容器初始化托盘控制器
+    # 5. 首次运行显示配置向导
+    if should_show_wizard():
+        show_setup_wizard()
+
+    # 6. 通过 DI 容器初始化托盘控制器
     controller = init_tray_controller(app)
 
     # 6. 初始化闪电添加浮层与全局快捷键
