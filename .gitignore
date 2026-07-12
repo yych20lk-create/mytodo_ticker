@@ -40,3 +40,6 @@ Thumbs.db
 
 # 用户本地数据（不提交）
 *.local.json
+
+# Codegraph 运行时文件
+.codegraph/daemon.pid
