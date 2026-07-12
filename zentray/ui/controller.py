@@ -7,12 +7,12 @@
   - TrayRenderer：封装托盘底层渲染
   - MenuBuilder：负责菜单结构生成
 """
-from typing import Optional
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication
 from zentray.services.task_service import TaskService
 from zentray.services.pomodoro_service import PomodoroService
 from zentray.services.script_service import ScriptService
+from zentray.services.settings_manager import SettingsManager
 from zentray.ui.renderer import TrayRenderer
 from zentray.ui.menu_builder import MenuBuilder
 from zentray.ui.extensions.loader import ExtensionLoader
@@ -41,6 +41,9 @@ class TrayController(QObject):
         self.menu_builder = menu_builder
         self.extension_loader = extension_loader
 
+        # 设置管理器
+        self._settings = SettingsManager()
+
         # 加载扩展
         self.extensions = self.extension_loader.load_all()
 
@@ -51,16 +54,19 @@ class TrayController(QObject):
         # 连接脚本日志信号
         self.script_service.log_updated.connect(self._on_script_log)
 
-        # 启动轮播定时器
+        # 动态轮播定时器（根据当前任务优先级调整间隔）
         self.poll_timer = QTimer()
-        self.poll_timer.timeout.connect(self._update_display)
-        self.poll_timer.start(POLLING_INTERVAL_MS)
+        self.poll_timer.setSingleShot(True)  # 单次触发，每次手动重新启动
+        self.poll_timer.timeout.connect(self._on_poll_tick)
+
+        # 启动首次轮播
+        self._schedule_next_poll(delay_ms=500)
 
         # 应用退出时关闭托盘
         self.app.aboutToQuit.connect(self.renderer.shutdown)
 
     # ==========================================
-    # 事件路由（后续 Task 9 将替换为命令模式）
+    # 事件路由
     # ==========================================
 
     def handle_action(self, action_id: str) -> None:
@@ -68,15 +74,51 @@ class TrayController(QObject):
         from .commands import dispatch
 
         if not dispatch(action_id, self):
-            # 未识别的命令，静默忽略
-            pass
+            pass  # 未识别的命令
+
+    # ==========================================
+    # 动态轮播
+    # ==========================================
+
+    def _on_poll_tick(self) -> None:
+        """定时器触发：更新显示后，根据当前任务优先级调度下一次"""
+        self._update_display()
+
+        # 根据当前任务优先级决定下次间隔
+        task = self.task_service.get_current_task()
+        if task:
+            dwell_seconds = self._settings.get_dwell_seconds(task.priority)
+        else:
+            dwell_seconds = 3  # 无任务时默认 3 秒
+
+        self._schedule_next_poll(dwell_seconds * 1000)
+
+    def _schedule_next_poll(self, delay_ms: int) -> None:
+        """安排下一次轮播刷新"""
+        self.poll_timer.start(delay_ms)
+
+    # ==========================================
+    # 设置应用
+    # ==========================================
+
+    def apply_settings(self) -> None:
+        """重新加载设置并应用到各服务（设置对话框保存后调用）"""
+        # 重建 SettingsManager 单例以刷新缓存
+        SettingsManager._instance = None
+        self._settings = SettingsManager()
+
+        # 更新番茄钟服务时长
+        self.pomodoro_service.duration = self._settings.pomodoro.duration_minutes * 60
+
+        # 立即触发一次显示更新
+        self._update_display()
 
     # ==========================================
     # 显示更新
     # ==========================================
 
     def _update_display(self) -> None:
-        """更新状态栏显示（由定时器触发）"""
+        """更新状态栏显示"""
         if self.pomodoro_service.is_active:
             mins = self.pomodoro_service.get_remaining() // 60
             self.renderer.set_text(f"🍅 专注中 {mins}分钟")
@@ -114,11 +156,9 @@ class TrayController(QObject):
     # ==========================================
 
     def _on_pomodoro_tick(self, seconds: int) -> None:
-        """番茄钟每秒回调"""
         self._update_display()
 
     def _on_pomodoro_end(self) -> None:
-        """番茄钟结束回调"""
         self.renderer.show_notification("专注结束", "番茄钟已完成，休息一下吧！")
 
     def _on_script_log(self, log: str) -> None:

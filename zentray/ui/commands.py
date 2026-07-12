@@ -119,6 +119,19 @@ class QuitCommand(ActionCommand):
         controller.app.quit()
 
 
+class SettingsCommand(ActionCommand):
+    """打开设置对话框"""
+
+    def execute(self, controller: "TrayController") -> None:
+        from zentray.ui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+        if dialog.exec():
+            # 设置已保存，刷新控制器以应用新设置
+            controller.apply_settings()
+            controller._update_display()
+
+
 # ==========================================
 # 任务列表命令
 # ==========================================
@@ -184,6 +197,7 @@ COMMAND_MAP = {
     "stop_pomodoro": PomodoroStopCommand(),
     "extend_pomodoro": PomodoroExtendCommand(),
     "quit": QuitCommand(),
+    "settings": SettingsCommand(),
 }
 
 

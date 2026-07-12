@@ -25,8 +25,15 @@ class NightlyJobWorker(QThread):
             now = datetime.datetime.now()
             today_str = now.strftime("%Y-%m-%d")
 
-            # 定时触发器：到达 23:30 且今日尚未执行
-            if now.hour == 23 and now.minute >= 30 and self.last_run_date != today_str:
+            # 从设置中读取触发时间
+            from zentray.services.settings_manager import SettingsManager
+            settings = SettingsManager()
+            trigger_hour = settings.nightly.trigger_hour
+            trigger_minute = settings.nightly.trigger_minute
+
+            # 定时触发器：到达设定时间且今日尚未执行
+            if (now.hour == trigger_hour and now.minute >= trigger_minute
+                    and self.last_run_date != today_str):
                 self._execute_nightly_review(today_str)
                 self.last_run_date = today_str
 

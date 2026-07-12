@@ -40,8 +40,11 @@ class PomodoroService(QObject):
         self.timer.stop()
         self.remaining_seconds = 0
 
-    def extend(self, additional_minutes: int = 10) -> None:
-        """延长专注时间"""
+    def extend(self, additional_minutes: int = None) -> None:
+        """延长专注时间（默认使用设置中的延长步长）"""
+        if additional_minutes is None:
+            from zentray.services.settings_manager import SettingsManager
+            additional_minutes = SettingsManager().pomodoro.extend_minutes
         if self.is_active:
             self.remaining_seconds += additional_minutes * 60
 

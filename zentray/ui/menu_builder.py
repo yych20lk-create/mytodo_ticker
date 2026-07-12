@@ -130,6 +130,7 @@ class MenuBuilder:
             items.extend(ext_buttons)
 
         items.append("separator")
+        items.append({"id": "settings", "label": "⚙️ 设置"})
         items.append({"id": "quit", "label": "❌ 退出程序"})
 
         return items
