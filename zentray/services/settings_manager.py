@@ -136,6 +136,20 @@ class AppearanceSettings:
 
 
 @dataclass
+class OpsSettings:
+    """脚本与服务插件运行时。"""
+
+    enabled: bool = False
+    load_bundled: bool = True
+    load_user: bool = True
+    # 空字符串表示使用默认 DATA_DIR/plugins
+    user_plugins_dir: str = ""
+    confirm_before_run: bool = True
+    # task_menu | ops_menu
+    tray_left_click: str = "task_menu"
+
+
+@dataclass
 class AIApiProfile:
     """命名模型接入配置；同时仅 active_api_id 对应的一个生效。"""
 
@@ -307,6 +321,7 @@ class AppSettings:
     categories: CategorySettings = field(default_factory=default_category_settings)
     quick_add: QuickAddSettings = field(default_factory=QuickAddSettings)
     appearance: AppearanceSettings = field(default_factory=AppearanceSettings)
+    ops: OpsSettings = field(default_factory=OpsSettings)
 
 
 class SettingsManager:
@@ -467,6 +482,19 @@ class SettingsManager:
             if theme not in ("light", "dark", "system"):
                 theme = "system"
             self._settings.appearance = AppearanceSettings(theme=theme)
+        if "ops" in data:
+            o = data["ops"] or {}
+            left = (o.get("tray_left_click") or "task_menu").lower()
+            if left not in ("task_menu", "ops_menu"):
+                left = "task_menu"
+            self._settings.ops = OpsSettings(
+                enabled=bool(o.get("enabled", False)),
+                load_bundled=bool(o.get("load_bundled", True)),
+                load_user=bool(o.get("load_user", True)),
+                user_plugins_dir=str(o.get("user_plugins_dir") or ""),
+                confirm_before_run=bool(o.get("confirm_before_run", True)),
+                tray_left_click=left,
+            )
 
         # 用 review 回写 nightly 兼容
         self._sync_nightly_from_review()
@@ -564,6 +592,7 @@ class SettingsManager:
             "categories": self._settings.categories.to_dict(),
             "quick_add": asdict(self._settings.quick_add),
             "appearance": asdict(self._settings.appearance),
+            "ops": asdict(self._settings.ops),
         }
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -599,6 +628,17 @@ class SettingsManager:
     @property
     def appearance(self) -> AppearanceSettings:
         return self._settings.appearance
+
+    @property
+    def ops(self) -> OpsSettings:
+        return self._settings.ops
+
+    def get_ops_user_plugins_dir(self) -> Path:
+        """用户插件目录（绝对路径）。"""
+        raw = (self.ops.user_plugins_dir or "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return (DATA_DIR / "plugins").resolve()
 
     def get_all(self) -> AppSettings:
         return self._settings

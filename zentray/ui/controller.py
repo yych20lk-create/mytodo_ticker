@@ -14,6 +14,9 @@ import logging
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication
 
+from zentray.config import _PROJECT_ROOT
+from zentray.plugins.loader import PluginLoader
+from zentray.plugins.runtime import PluginRuntime
 from zentray.services.task_service import TaskService
 from zentray.services.pomodoro_service import PomodoroService
 from zentray.services.script_service import ScriptService
@@ -37,6 +40,8 @@ class TrayController(QObject):
         renderer: TrayRenderer,
         menu_builder: MenuBuilder,
         extension_loader: ExtensionLoader,
+        plugin_runtime: PluginRuntime | None = None,
+        plugin_loader: PluginLoader | None = None,
     ):
         super().__init__()
         self.app = app
@@ -46,20 +51,31 @@ class TrayController(QObject):
         self.renderer = renderer
         self.menu_builder = menu_builder
         self.extension_loader = extension_loader
+        self.plugin_runtime = plugin_runtime or PluginRuntime()
+        self.plugin_loader = plugin_loader or PluginLoader()
 
         self._settings = SettingsManager()
         self.extensions = self.extension_loader.load_all()
+        self._ops_plugins = []
         self._poll_count = 0
         self._last_label = None  # None = 尚未推送过
         self._last_icon = None
         # 启动阶段：仅应用图标，等首次轮播 tick 再显示饼图+标题
         self._carousel_started = False
+        self._ops_active = False
+        self._ops_tray_text = ""
 
         self.renderer.backend.action_received.connect(self.handle_action)
         self.pomodoro_service.time_updated.connect(self._on_pomodoro_tick)
         self.pomodoro_service.pomodoro_finished.connect(self._on_pomodoro_end)
+        # 兼容旧 ScriptService 信号
         self.script_service.log_updated.connect(self._on_script_log)
         self.script_service.script_finished.connect(self._on_script_finished)
+        self.plugin_runtime.log_line.connect(self._on_ops_log)
+        self.plugin_runtime.script_finished.connect(self._on_ops_finished)
+        self.plugin_runtime.busy_changed.connect(self._on_ops_busy)
+
+        self.reload_ops_plugins()
 
         # 可靠轮播：重复定时器（挂到 self，避免被 GC）
         self.poll_timer = QTimer(self)
@@ -117,9 +133,36 @@ class TrayController(QObject):
         if not dispatch(action_id, self):
             logger.debug("未识别的菜单 action: %s", action_id)
 
+    def reload_ops_plugins(self) -> None:
+        """按设置扫描插件。"""
+        ops = self._settings.ops
+        if not ops.enabled:
+            self._ops_plugins = []
+            return
+        bundled = _PROJECT_ROOT / "bundled_plugins"
+        user = self._settings.get_ops_user_plugins_dir()
+        self._ops_plugins = self.plugin_loader.scan(
+            bundled_dir=bundled,
+            user_dir=user,
+            load_bundled=ops.load_bundled,
+            load_user=ops.load_user,
+        )
+        logger.info(
+            "脚本与服务插件已加载 %s 个（失败 %s）",
+            len(self._ops_plugins),
+            len(self.plugin_loader.failures),
+        )
+
     def _on_poll_tick(self) -> None:
         """定时推进轮播并刷新顶栏标题。"""
         try:
+            if self._ops_active or self.plugin_runtime.is_busy:
+                # 抢占：不推进任务轮播，仅保持 ops 文案
+                if not self._carousel_started:
+                    self._carousel_started = True
+                self.update_display(update_menu=False)
+                return
+
             if self.pomodoro_service.is_active:
                 if not self._carousel_started:
                     self._carousel_started = True
@@ -165,6 +208,7 @@ class TrayController(QObject):
                 self.pomodoro_service.duration = (
                     self._settings.pomodoro.duration_minutes * 60
                 )
+        self.reload_ops_plugins()
         self.task_service.refresh_scheduler()
         if self.task_service.get_current_task() is None:
             self.task_service.advance_rotation()
@@ -178,11 +222,18 @@ class TrayController(QObject):
         from zentray.resources import tray_pie_icon_name, tray_tomato_icon_name
 
         # 启动阶段未进入轮播：强制仅应用图标
-        if not self._carousel_started and not self.pomodoro_service.is_active:
+        if (
+            not self._carousel_started
+            and not self.pomodoro_service.is_active
+            and not self._ops_active
+        ):
             self._show_boot_placeholder(update_menu=update_menu)
             return
 
-        if self.pomodoro_service.is_active:
+        if self._ops_active or self.plugin_runtime.is_busy:
+            icon = "app_icon"
+            text = (self._ops_tray_text or "⚡ 脚本运行中")[:50]
+        elif self.pomodoro_service.is_active:
             # 左侧：随倒计时填充的番茄饼图；右侧：文案或倒计时
             pct = self.pomodoro_service.get_elapsed_progress_percent()
             icon = tray_tomato_icon_name(pct)
@@ -220,6 +271,9 @@ class TrayController(QObject):
             task_exists=task is not None,
             is_pomodoro=self.pomodoro_service.is_active,
             extensions=self.extensions,
+            ops_enabled=bool(self._settings.ops.enabled),
+            ops_plugins=self._ops_plugins,
+            ops_busy=self.plugin_runtime.is_busy or self._ops_active,
         )
         if self.menu_builder.should_update(items):
             self.renderer.update_menu(items)
@@ -254,6 +308,45 @@ class TrayController(QObject):
     def _on_script_finished(self, name: str, success: bool) -> None:
         status = "执行成功" if success else "执行失败"
         self.renderer.show_notification(f"脚本: {name}", status)
+
+    def _on_ops_log(self, text: str) -> None:
+        self._ops_active = True
+        self._carousel_started = True
+        self._ops_tray_text = (text or "")[:50]
+        self.renderer.set_state("app_icon", self._ops_tray_text)
+        self._last_icon = "app_icon"
+        self._last_label = self._ops_tray_text
+
+    def _on_ops_busy(self, busy: bool) -> None:
+        if busy:
+            self._ops_active = True
+            self._carousel_started = True
+        self._refresh_menu()
+
+    def _on_ops_finished(self, plugin_id: str, success: bool, summary: str) -> None:
+        self._ops_active = False
+        self._ops_tray_text = ""
+        name = plugin_id
+        plug = self.plugin_loader.get(plugin_id)
+        if plug:
+            name = plug.manifest.name
+        status = "执行成功" if success else f"执行失败: {summary}"
+        self.renderer.show_notification(f"脚本: {name}", status[:120])
+        try:
+            from zentray.services.activity_log import log_event
+
+            log_event(
+                "system",
+                "plugin_run",
+                title=name,
+                detail=summary,
+                meta={"id": plugin_id, "ok": success},
+            )
+        except Exception:
+            pass
+        self._carousel_started = True
+        self.update_display(update_menu=True)
+        self.start_rotation()
 
     def _on_about_to_quit(self) -> None:
         try:

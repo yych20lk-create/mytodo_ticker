@@ -17,6 +17,8 @@ from zentray.core.scheduler import Scheduler
 from zentray.services.task_service import TaskService
 from zentray.services.pomodoro_service import PomodoroService
 from zentray.services.script_service import ScriptService
+from zentray.plugins.loader import PluginLoader
+from zentray.plugins.runtime import PluginRuntime
 from zentray.ui.renderer import TrayRenderer
 from zentray.ui.menu_builder import MenuBuilder
 from zentray.ui.extensions.loader import ExtensionLoader
@@ -71,6 +73,16 @@ class AppModule(Module):
 
     @provider
     @singleton
+    def provide_plugin_runtime(self) -> PluginRuntime:
+        return PluginRuntime()
+
+    @provider
+    @singleton
+    def provide_plugin_loader(self) -> PluginLoader:
+        return PluginLoader()
+
+    @provider
+    @singleton
     def provide_menu_builder(self) -> MenuBuilder:
         return MenuBuilder()
 
@@ -113,6 +125,8 @@ def init_tray_controller(app) -> "TrayController":
     script_service = injector.get(ScriptService)
     menu_builder = injector.get(MenuBuilder)
     extension_loader = injector.get(ExtensionLoader)
+    plugin_runtime = injector.get(PluginRuntime)
+    plugin_loader = injector.get(PluginLoader)
     renderer = init_tray_renderer(app)
 
     controller = TrayController(
@@ -123,5 +137,7 @@ def init_tray_controller(app) -> "TrayController":
         renderer=renderer,
         menu_builder=menu_builder,
         extension_loader=extension_loader,
+        plugin_runtime=plugin_runtime,
+        plugin_loader=plugin_loader,
     )
     return controller

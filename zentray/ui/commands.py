@@ -145,6 +145,16 @@ class PomodoroStartCommand(ActionCommand):
     """开始番茄钟"""
 
     def execute(self, controller: "TrayController") -> None:
+        if getattr(controller, "plugin_runtime", None) and controller.plugin_runtime.is_busy:
+            controller.renderer.show_notification(
+                "番茄钟", "脚本运行中，请稍后再开始专注。"
+            )
+            return
+        if getattr(controller, "_ops_active", False):
+            controller.renderer.show_notification(
+                "番茄钟", "运维脚本占用托盘中，请稍后再开始专注。"
+            )
+            return
         controller.pomodoro_service.start()
         controller.update_display()
 
@@ -365,7 +375,111 @@ def dispatch(action_id: str, controller: "TrayController") -> bool:
         ExtensionCommand(ext_name).execute(controller)
         return True
 
+    if action_id.startswith("ops."):
+        return _dispatch_ops_action(action_id, controller)
+
     # 3. 未识别的命令
+    return False
+
+
+def _dispatch_ops_action(action_id: str, controller: "TrayController") -> bool:
+    """脚本与服务插件菜单。"""
+    from PySide6.QtWidgets import QMessageBox
+
+    if action_id in ("ops._empty", "ops._hdr_scripts", "ops._hdr_services", "ops_menu"):
+        return True
+
+    if action_id == "ops.open_last_log":
+        from pathlib import Path
+        import subprocess
+        import sys
+
+        from zentray.config import DATA_DIR
+
+        last = DATA_DIR / "ops_runs" / "last.json"
+        if not last.is_file():
+            controller.renderer.show_notification("脚本与服务", "尚无运行记录")
+            return True
+        try:
+            import json
+
+            data = json.loads(last.read_text(encoding="utf-8"))
+            log_path = Path(data.get("log") or "")
+            if log_path.is_file():
+                if sys.platform.startswith("linux"):
+                    subprocess.Popen(["xdg-open", str(log_path)])
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", str(log_path)])
+                else:
+                    subprocess.Popen(["cmd", "/c", "start", "", str(log_path)])
+            else:
+                controller.renderer.show_notification(
+                    "脚本与服务", data.get("summary") or "无日志文件"
+                )
+        except Exception as e:
+            controller.renderer.show_notification("打开日志失败", str(e)[:100])
+        return True
+
+    runtime = getattr(controller, "plugin_runtime", None)
+    loader = getattr(controller, "plugin_loader", None)
+    if runtime is None or loader is None:
+        return False
+
+    if action_id.startswith("ops.script."):
+        pid = action_id[len("ops.script.") :]
+        plug = loader.get(pid)
+        if not plug:
+            controller.renderer.show_notification("脚本与服务", f"插件不存在: {pid}")
+            return True
+        if controller.pomodoro_service.is_active:
+            controller.renderer.show_notification(
+                "脚本与服务", "番茄钟进行中，请先结束专注。"
+            )
+            return True
+        sm = controller._settings
+        if sm.ops.confirm_before_run:
+            ret = QMessageBox.question(
+                None,
+                "运行脚本",
+                f"确定运行「{plug.manifest.name}」？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if ret != QMessageBox.StandardButton.Yes:
+                return True
+        runtime.run_script(
+            plug, pomodoro_active=controller.pomodoro_service.is_active
+        )
+        return True
+
+    if action_id.startswith("ops.service."):
+        rest = action_id[len("ops.service.") :]
+        # id.action 或 仅 id（打开时无）
+        if rest.endswith(".start"):
+            pid, act = rest[: -len(".start")], "start"
+        elif rest.endswith(".stop"):
+            pid, act = rest[: -len(".stop")], "stop"
+        elif rest.endswith(".status"):
+            pid, act = rest[: -len(".status")], "status"
+        else:
+            return True
+        plug = loader.get(pid)
+        if not plug:
+            controller.renderer.show_notification("脚本与服务", f"插件不存在: {pid}")
+            return True
+        if act in ("start", "stop") and controller.pomodoro_service.is_active:
+            controller.renderer.show_notification(
+                "脚本与服务", "番茄钟进行中，请先结束专注。"
+            )
+            return True
+        ok = runtime.service_cmd(
+            plug, act, pomodoro_active=controller.pomodoro_service.is_active
+        )
+        controller.renderer.show_notification(
+            plug.manifest.name,
+            f"{act} " + ("成功" if ok else "失败"),
+        )
+        return True
+
     return False
 
 

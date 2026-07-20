@@ -34,6 +34,7 @@ dependencies = [
     "requests>=2.31.0",
     "pynput>=1.7.6",
     "injector>=0.21.0",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

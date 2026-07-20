@@ -242,6 +242,7 @@ def _settings_dict() -> dict:
         "categories": s.categories.to_dict(),
         "quick_add": asdict(s.quick_add),
         "appearance": asdict(s.appearance),
+        "ops": asdict(s.ops),
     }
 
 
