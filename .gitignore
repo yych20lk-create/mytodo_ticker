@@ -58,3 +58,7 @@ htmlcov/
 # 前端
 web/node_modules/
 # web/dist 随源码提交，便于无 Node 环境直接打包
+
+# Windows guest build venv
+venv_win/
+dist/releases/win_build.*
