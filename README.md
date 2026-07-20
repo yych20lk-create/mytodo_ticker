@@ -94,6 +94,8 @@ cp -a path/to/plugin ~/.local/share/ZenTray/plugins/
 
 完整约定：[docs/plugins/PLUGIN_SPEC.md](docs/plugins/PLUGIN_SPEC.md)。
 
+内置示例插件 **网络清理**：`bundled_plugins/net-cleanup/`（刷新 DNS/路由缓存等，详见目录内 README）。
+
 ---
 
 ## 打包

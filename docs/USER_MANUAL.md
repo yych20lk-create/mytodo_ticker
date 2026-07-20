@@ -213,9 +213,19 @@ cp -a /path/to/my-plugin ~/.local/share/ZenTray/plugins/
 - 菜单「📄 上次运行日志」可打开最近一次完整日志（若存在）。  
 - 日志目录：数据目录下 `ops_runs/`。
 
-### 8.4 与业务的关系
+### 8.4 内置示例：网络清理
 
-VPN 切换、清 DNS、邮箱相关等**具体操作**都由你自己的插件实现；应用只负责发现、校验与展示进度。
+若开启 **加载内置插件**，菜单中可有 **网络清理（示例）**（`net-cleanup`）：
+
+- 尝试刷新 DNS（`resolvectl` / `systemd-resolve`）  
+- 尝试刷新 nscd、路由缓存（无权限则跳过并记日志）  
+- 打印当前代理相关环境变量（不修改）  
+
+**不会**自动断开 VPN 或改 Clash 配置。完整说明见仓库 `bundled_plugins/net-cleanup/README.md`。
+
+### 8.5 与业务的关系
+
+VPN 切换、邮箱相关等**具体操作**由你自己的插件实现；应用只负责发现、校验与展示进度。可复制 `net-cleanup` 目录改 `id`/`run.sh` 作为模板。
 
 ---
 

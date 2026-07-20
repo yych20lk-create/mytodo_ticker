@@ -192,9 +192,17 @@ python scripts/validate_plugin.py path/to/plugin
 
 ## 9. 样例
 
-仓库内测试夹具（仅供开发）：
+### 9.1 内置示例（随应用分发）
+
+| 路径 | id | 说明 |
+|------|-----|------|
+| `bundled_plugins/net-cleanup/` | `net-cleanup` | **网络清理**：刷新 DNS/路由缓存、打印代理环境变量（Linux） |
+
+启用「脚本与服务」并打开 **加载内置插件** 后，菜单中可见「网络清理（示例）」。  
+说明见该目录 `README.md`。
+
+### 9.2 测试夹具（仅供开发/CI）
 
 - `tests/fixtures/plugins/sample-script`  
 - `tests/fixtures/plugins/sample-service`  
-
-复制到用户插件目录即可试用（需启用「脚本与服务」）。
+- `tests/fixtures/plugins/bad-escape`（故意非法，用于校验门禁）
