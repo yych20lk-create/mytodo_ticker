@@ -15,6 +15,7 @@
           <a-menu-item key="ai_hub">AI 与通知</a-menu-item>
           <a-menu-item key="polling">任务轮播</a-menu-item>
           <a-menu-item key="pomodoro">番茄钟</a-menu-item>
+          <a-menu-item key="ops">脚本与服务</a-menu-item>
           <a-menu-item key="categories">分类</a-menu-item>
           <a-menu-item key="appearance">外观</a-menu-item>
         </a-menu>
@@ -381,6 +382,66 @@
             </div>
           </template>
 
+          <template v-else-if="mainKey === 'ops'">
+            <div class="poll-stack">
+              <section class="compact-block">
+                <div class="compact-row">
+                  <span class="compact-label">启用脚本与服务</span>
+                  <a-switch v-model="form.ops.enabled" size="small" />
+                </div>
+                <p class="hint">
+                  开启后，托盘菜单顶部出现「🧩 脚本与服务」。插件须符合
+                  <code>plugin.yaml</code> 规范并通过校验后才会加载。
+                </p>
+              </section>
+
+              <section class="compact-block" :class="{ 'is-disabled': !form.ops.enabled }">
+                <div class="compact-row">
+                  <span class="compact-label">加载内置插件</span>
+                  <a-switch v-model="form.ops.load_bundled" size="small" :disabled="!form.ops.enabled" />
+                </div>
+                <div class="compact-row">
+                  <span class="compact-label">加载用户插件</span>
+                  <a-switch v-model="form.ops.load_user" size="small" :disabled="!form.ops.enabled" />
+                </div>
+                <div class="compact-row">
+                  <span class="compact-label">用户插件目录</span>
+                  <a-input
+                    v-model="form.ops.user_plugins_dir"
+                    placeholder="留空 = 数据目录/plugins"
+                    :disabled="!form.ops.enabled || !form.ops.load_user"
+                    style="max-width: 320px"
+                  />
+                </div>
+                <div class="compact-row">
+                  <span class="compact-label">执行前确认</span>
+                  <a-switch
+                    v-model="form.ops.confirm_before_run"
+                    size="small"
+                    :disabled="!form.ops.enabled"
+                  />
+                </div>
+                <div class="compact-row">
+                  <span class="compact-label">左键点击托盘</span>
+                  <a-radio-group
+                    v-model="form.ops.tray_left_click"
+                    size="small"
+                    :disabled="!form.ops.enabled"
+                  >
+                    <a-radio value="task_menu">任务菜单</a-radio>
+                    <a-radio value="ops_menu">脚本与服务（菜单仍含全部项，入口置顶）</a-radio>
+                  </a-radio-group>
+                </div>
+              </section>
+
+              <a-alert type="info">
+                插件规范见仓库 <code>docs/plugins/PLUGIN_SPEC.md</code>。
+                校验：<code>python scripts/validate_plugin.py &lt;插件目录&gt;</code>。
+                默认用户目录：Linux <code>~/.local/share/ZenTray/plugins/</code>。
+              </a-alert>
+            </div>
+          </template>
+
           <template v-else-if="mainKey === 'appearance'">
             <a-form layout="vertical" style="max-width: 420px">
               <a-form-item label="主题">
@@ -473,6 +534,14 @@ function emptyForm() {
     },
     quick_add: { default_category: '工作', default_priority: 'medium' },
     appearance: { theme: 'system' },
+    ops: {
+      enabled: false,
+      load_bundled: true,
+      load_user: true,
+      user_plugins_dir: '',
+      confirm_before_run: true,
+      tray_left_click: 'task_menu',
+    },
   }
 }
 
@@ -662,6 +731,13 @@ function normalizeLoaded(s) {
   if (!form.pomodoro) form.pomodoro = emptyForm().pomodoro
   if (!form.pomodoro.tray_display) form.pomodoro.tray_display = 'countdown'
   if (!form.pomodoro.tray_text) form.pomodoro.tray_text = '专注中'
+  if (!form.ops) form.ops = emptyForm().ops
+  if (form.ops.tray_left_click !== 'ops_menu') form.ops.tray_left_click = 'task_menu'
+  if (typeof form.ops.enabled !== 'boolean') form.ops.enabled = false
+  if (typeof form.ops.load_bundled !== 'boolean') form.ops.load_bundled = true
+  if (typeof form.ops.load_user !== 'boolean') form.ops.load_user = true
+  if (typeof form.ops.confirm_before_run !== 'boolean') form.ops.confirm_before_run = true
+  if (form.ops.user_plugins_dir == null) form.ops.user_plugins_dir = ''
 
   // 默认展开当前使用的 API
   if (form.ai.active_api_id) {
@@ -794,6 +870,14 @@ onMounted(async () => {
 .settings-body.is-ai :deep(.arco-tabs-content-list) {
   height: auto;
 }
+.is-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.is-disabled .compact-row {
+  pointer-events: none;
+}
+
 .section {
   max-width: 900px;
 }
