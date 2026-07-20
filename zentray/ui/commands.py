@@ -29,13 +29,17 @@ class NewTaskCommand(ActionCommand):
     """新建任务"""
 
     def execute(self, controller: "TrayController") -> None:
+        from zentray.ui.vue_commands import try_vue_new_task
+
+        if try_vue_new_task(controller):
+            return
         from zentray.ui.dialogs import TaskDialog
 
         dialog = TaskDialog()
         if dialog.exec():
             data = dialog.get_data()
             controller.task_service.create_task(data)
-            controller._update_display()
+            controller.update_display()
 
 
 class DoneCommand(ActionCommand):
@@ -45,7 +49,7 @@ class DoneCommand(ActionCommand):
         task = controller.task_service.get_current_task()
         if task:
             controller.task_service.mark_done(task.id)
-            controller._update_display()
+            controller.update_display()
 
 
 class AbandonCommand(ActionCommand):
@@ -55,37 +59,86 @@ class AbandonCommand(ActionCommand):
         task = controller.task_service.get_current_task()
         if task:
             controller.task_service.abandon(task.id)
-            controller._update_display()
+            controller.update_display()
 
 
 class ProgressCommand(ActionCommand):
-    """更新进度"""
+    """更新进度（当前轮播任务）"""
 
     def execute(self, controller: "TrayController") -> None:
-        from zentray.ui.dialogs import ProgressDialog
-
         task = controller.task_service.get_current_task()
         if task:
-            dialog = ProgressDialog(task=task)
-            if dialog.exec():
-                percent, note = dialog.get_data()
-                controller.task_service.update_progress(task.id, percent, note)
-                controller._update_display()
+            _run_progress_dialog(controller, task)
+
+
+class TaskListCommand(ActionCommand):
+    """打开任务列表面板（左列表 + 右操作）"""
+
+    def execute(self, controller: "TrayController") -> None:
+        from zentray.ui.vue_commands import try_vue_task_list
+
+        if try_vue_task_list(controller):
+            return
+        from zentray.ui.task_list_dialog import TaskListDialog
+
+        dialog = TaskListDialog(controller.task_service)
+        if not dialog.exec():
+            return
+        result = dialog.get_selected_action()
+        if not result:
+            return
+        action, task_id = result
+        task = controller.task_service.find_task(task_id)
+        if not task:
+            controller.update_display()
+            return
+        _dispatch_task_action(action, task, controller)
+
+
+def _run_progress_dialog(controller: "TrayController", task) -> None:
+    from zentray.ui.vue_commands import try_vue_progress
+
+    if try_vue_progress(controller, task):
+        return
+    from zentray.ui.dialogs import ProgressDialog
+
+    dialog = ProgressDialog(task=task)
+    if not dialog.exec():
+        return
+    action = getattr(dialog, "result_action", "save")
+    if action == "done":
+        controller.task_service.mark_done(task.id)
+    elif action == "abandon":
+        controller.task_service.abandon(task.id)
+    else:
+        percent, note = dialog.get_data()
+        controller.task_service.update_progress(task.id, percent, note)
+    controller.update_display()
 
 
 class EditCommand(ActionCommand):
-    """编辑当前任务"""
+    """编辑当前任务（一次性或周期实例，均可完整编辑）"""
 
     def execute(self, controller: "TrayController") -> None:
+        task = controller.task_service.get_current_task()
+        if not task:
+            return
+        fresh = controller.task_service.find_task(task.id) or task
+        from zentray.ui.vue_commands import try_vue_edit_task
+
+        if try_vue_edit_task(controller, fresh):
+            return
         from zentray.ui.dialogs import TaskDialog
 
-        task = controller.task_service.get_current_task()
-        if task:
-            dialog = TaskDialog(task=task)
-            if dialog.exec():
-                data = dialog.get_data()
-                controller.task_service.update_task(task.id, data)
-                controller._update_display()
+        dialog = TaskDialog(task=fresh)
+        if dialog.exec():
+            data = dialog.get_data()
+            # 保留实例类型，勿被表单误改成 one-time 丢 template_id
+            if getattr(fresh, "task_type", None) == "periodic_instance":
+                data["task_type"] = "periodic_instance"
+                data["template_id"] = fresh.template_id
+            controller.task_service.update_task(task.id, data)
+            controller.update_display()
 
 
 class PomodoroStartCommand(ActionCommand):
@@ -93,7 +146,7 @@ class PomodoroStartCommand(ActionCommand):
 
     def execute(self, controller: "TrayController") -> None:
         controller.pomodoro_service.start()
-        controller._update_display()
+        controller.update_display()
 
 
 class PomodoroStopCommand(ActionCommand):
@@ -101,7 +154,7 @@ class PomodoroStopCommand(ActionCommand):
 
     def execute(self, controller: "TrayController") -> None:
         controller.pomodoro_service.stop()
-        controller._update_display()
+        controller.update_display()
 
 
 class PomodoroExtendCommand(ActionCommand):
@@ -109,7 +162,7 @@ class PomodoroExtendCommand(ActionCommand):
 
     def execute(self, controller: "TrayController") -> None:
         controller.pomodoro_service.extend()
-        controller._update_display()
+        controller.update_display()
 
 
 class QuitCommand(ActionCommand):
@@ -123,13 +176,87 @@ class SettingsCommand(ActionCommand):
     """打开设置对话框"""
 
     def execute(self, controller: "TrayController") -> None:
+        from zentray.ui.vue_commands import try_vue_settings
+
+        if try_vue_settings(controller):
+            return
         from zentray.ui.settings_dialog import SettingsDialog
 
         dialog = SettingsDialog()
         if dialog.exec():
             # 设置已保存，刷新控制器以应用新设置
             controller.apply_settings()
-            controller._update_display()
+            controller.update_display()
+
+
+class HistoryCommand(ActionCommand):
+    """历史记录：任务操作日志 + AI 报告"""
+
+    def execute(self, controller: "TrayController") -> None:
+        from zentray.ui.vue_commands import try_vue_history
+
+        if try_vue_history(controller):
+            return
+        from zentray.ui.web_host import use_vue_ui
+
+        if not use_vue_ui():
+            controller.renderer.show_notification(
+                "历史记录",
+                "请构建 Vue 前端（web/dist）后使用历史记录功能。",
+            )
+
+
+class PeriodicManageCommand(ActionCommand):
+    """周期任务管理"""
+
+    def execute(self, controller: "TrayController") -> None:
+        from zentray.ui.vue_commands import try_vue_periodic
+
+        if try_vue_periodic(controller):
+            return
+        from zentray.ui.periodic_manager import PeriodicManagerDialog
+
+        dialog = PeriodicManagerDialog(controller.task_service)
+        dialog.exec()
+        controller.reload_data()
+
+
+class AiReviewNowCommand(ActionCommand):
+    """立即执行 AI 复盘（不受「每天一次 / 周末节假日跳过」限制）。"""
+
+    def execute(self, controller: "TrayController") -> None:
+        import datetime
+        import logging
+
+        from zentray.services.settings_manager import SettingsManager
+        from zentray.workers.nightly_job import execute_nightly_review
+
+        log = logging.getLogger(__name__)
+        sm = SettingsManager()
+        if not sm.is_ai_configured() and not sm.is_notification_configured():
+            controller.renderer.show_notification(
+                "AI 复盘",
+                "请先在设置中配置 AI API Key（建议同时配置 WxPusher 推送）。",
+            )
+            return
+
+        controller.renderer.show_notification("AI 复盘", "正在生成复盘，请稍候…")
+        today = datetime.date.today().isoformat()
+        try:
+            ok = execute_nightly_review(today, controller.task_service.task_repo)
+            if ok:
+                controller.renderer.show_notification(
+                    "AI 复盘",
+                    "复盘已完成。本地 reviews/ 或微信推送请查看结果。",
+                )
+            else:
+                controller.renderer.show_notification(
+                    "AI 复盘",
+                    "复盘已执行，但推送可能失败；请查看本地 reviews/ 目录。",
+                )
+        except Exception as e:
+            log.exception("立即 AI 复盘失败")
+            controller.renderer.show_notification("AI 复盘失败", str(e)[:120])
 
 
 # ==========================================
@@ -143,15 +270,20 @@ class TaskActionCommand(ActionCommand):
         self.task_id = task_id
 
     def execute(self, controller: "TrayController") -> None:
+        task = controller.task_service.find_task(self.task_id)
+        if not task:
+            return
+        from zentray.ui.vue_commands import try_vue_task_action
+
+        if try_vue_task_action(controller, task):
+            return
         from zentray.ui.dialogs import TaskActionDialog
 
-        task = controller.task_service.task_repo.find_by_id(self.task_id)
-        if task:
-            dialog = TaskActionDialog(task=task)
-            if dialog.exec():
-                action = dialog.get_selected_action()
-                if action:
-                    _dispatch_task_action(action, task, controller)
+        dialog = TaskActionDialog(task=task)
+        if dialog.exec():
+            action = dialog.get_selected_action()
+            if action:
+                _dispatch_task_action(action, task, controller)
 
 
 class SelectTaskCommand(ActionCommand):
@@ -162,7 +294,7 @@ class SelectTaskCommand(ActionCommand):
 
     def execute(self, controller: "TrayController") -> None:
         controller.task_service.select_task(self.task_id)
-        controller._update_display()
+        controller.update_display()
 
 
 # ==========================================
@@ -193,9 +325,13 @@ COMMAND_MAP = {
     "abandon": AbandonCommand(),
     "progress": ProgressCommand(),
     "edit": EditCommand(),
+    "task_list": TaskListCommand(),
     "pomodoro": PomodoroStartCommand(),
     "stop_pomodoro": PomodoroStopCommand(),
     "extend_pomodoro": PomodoroExtendCommand(),
+    "periodic_manage": PeriodicManageCommand(),
+    "ai_review_now": AiReviewNowCommand(),
+    "history": HistoryCommand(),
     "quit": QuitCommand(),
     "settings": SettingsCommand(),
 }
@@ -244,20 +380,23 @@ def _dispatch_task_action(action: str, task, controller: "TrayController") -> No
     elif action == "abandon":
         controller.task_service.abandon(task.id)
     elif action == "edit":
+        from zentray.ui.vue_commands import try_vue_edit_task
+
+        if try_vue_edit_task(controller, task):
+            return
         from zentray.ui.dialogs import TaskDialog
 
         dialog = TaskDialog(task=task)
         if dialog.exec():
             data = dialog.get_data()
+            if getattr(task, "task_type", None) == "periodic_instance":
+                data["task_type"] = "periodic_instance"
+                data["template_id"] = task.template_id
             controller.task_service.update_task(task.id, data)
     elif action == "progress":
-        from zentray.ui.dialogs import ProgressDialog
-
-        dialog = ProgressDialog(task=task)
-        if dialog.exec():
-            percent, note = dialog.get_data()
-            controller.task_service.update_progress(task.id, percent, note)
+        _run_progress_dialog(controller, task)
+        return  # _run_progress_dialog 已 update_display
     elif action == "select":
         controller.task_service.select_task(task.id)
 
-    controller._update_display()
+    controller.update_display()

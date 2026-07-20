@@ -22,6 +22,14 @@ class TrayRenderer:
         """更新托盘图标"""
         self.backend.set_icon(name)
 
+    def set_state(self, icon: str, text: str) -> None:
+        """原子更新图标 + 标题（避免 AppIndicator 换图标后丢文字）。"""
+        if hasattr(self.backend, "set_state"):
+            self.backend.set_state(icon, text)
+        else:
+            self.backend.set_icon(icon)
+            self.backend.set_label(text)
+
     def update_menu(self, items: list) -> None:
         """更新右键菜单"""
         self.backend.update_menu(items)

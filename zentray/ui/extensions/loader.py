@@ -12,7 +12,12 @@ from .interface import StatusBarExtension
 class ExtensionLoader:
     """动态加载状态栏扩展插件"""
 
-    def __init__(self, package_path: str = "extensions"):
+    def __init__(self, package_path: str | Path | None = None):
+        if package_path is None:
+            # 项目根 /extensions，不依赖 cwd
+            from zentray.config import _PROJECT_ROOT
+
+            package_path = _PROJECT_ROOT / "extensions"
         self.package_path = Path(package_path)
         self.extensions: List[StatusBarExtension] = []
 
@@ -20,6 +25,13 @@ class ExtensionLoader:
         """从插件目录加载所有扩展"""
         if not self.package_path.exists():
             return self.extensions
+
+        # 将插件父目录加入 path，便于 import extensions.xxx
+        parent = str(self.package_path.parent)
+        import sys
+
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
 
         for _, name, _ in pkgutil.iter_modules([str(self.package_path)]):
             try:

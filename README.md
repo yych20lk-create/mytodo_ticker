@@ -1,257 +1,107 @@
-# ZenTray 个人禅定看板 (v3.7)
+# ZenTray 个人禅定看板
 
-> 跨平台（Windows / macOS / Linux）个人任务管理与专注效率工具。
-> 系统托盘常驻，番茄钟 + GTD 看板 + AI 毒舌教练，助你高效摸鱼。
+> 跨平台（Windows / macOS / Linux）系统托盘 GTD + 番茄钟 + AI 计划/复盘。  
+> 当前版本见 `zentray/config.py`（版本规则：[docs/VERSIONING.md](docs/VERSIONING.md)）。
 
 <p align="center">
-  <strong>📋 GTD 任务管理 &nbsp;|&nbsp; 🍅 番茄专注 &nbsp;|&nbsp; 🤖 AI 每日复盘 &nbsp;|&nbsp; 📱 移动端推送</strong>
+  <strong>📋 任务轮播 &nbsp;|&nbsp; 🍅 番茄专注 &nbsp;|&nbsp; 🤖 每日计划/复盘 &nbsp;|&nbsp; 📱 多渠道通知</strong>
 </p>
+
+> 📖 **用户手册**：[docs/USER_MANUAL.md](docs/USER_MANUAL.md)  
+> 🖥️ **Vue 前端**：[docs/FRONTEND_VUE.md](docs/FRONTEND_VUE.md)
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
-### 下载安装包（推荐）
+### 安装包
 
-从 [GitHub Releases](https://github.com/zen-geek/zentray/releases) 下载对应平台的安装包：
+| 平台 | 包 | 方式 |
+|------|-----|------|
+| Linux | `zentray_*_amd64.deb` | `sudo apt install ./zentray_*.deb` → 命令 `zentray` |
+| Windows | `ZenTrayInstaller-*-x64.exe` | 双击安装向导 |
+| macOS | `ZenTray-*.dmg` | 拖入 Applications |
 
-| 平台 | 安装包 | 说明 |
-|------|--------|------|
-| **Linux** | `ZenTray-x86_64.AppImage` | 下载后 `chmod +x` 即可运行 |
-| **macOS** | `ZenTray-arm64.dmg` | 双击挂载，拖入 Applications |
-| **Windows** | `ZenTray-Setup-x64.exe` | 双击安装向导 |
+首次启动可走配置向导（可全部跳过）。程序**无主窗口**，请看**顶栏/托盘**。
 
-**无需任何配置即可启动！** 首次运行会出现配置向导，引导你完成可选功能（通知推送、AI 教练）的设置，所有步骤均可跳过。
-
-### 开发者安装
+### 开发运行
 
 ```bash
 git clone https://github.com/zen-geek/zentray.git
 cd zentray
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -e ".[dev]"
-python zentray/main.py
+# 前端（对话框为 Vue + Arco，需先构建）
+cd web && npm install && npm run build && cd ..
+python -m zentray.main
 ```
 
-### 可选功能配置
+强制使用原生 Qt 对话框：`export ZENTRAY_UI=qt`
 
-首次启动时配置向导会引导设置。也可在项目目录创建 `.env` 文件：
+### 可选环境变量（`.env` 或数据目录）
 
 ```env
-# 移动端推送（WxPusher）
-WXPUSHER_APP_TOKEN=your_token_here
-WXPUSHER_UID=your_uid_here
-
-# AI 夜间复盘教练
-AI_API_KEY=sk-your-key-here
+WXPUSHER_APP_TOKEN=...
+WXPUSHER_UID=...
+AI_API_KEY=...
 AI_API_BASE_URL=https://api.openai.com/v1
 AI_MODEL_NAME=gpt-4o
 ```
 
----
-
-## ✨ 功能特性
-
-| 功能 | 说明 | 配置要求 |
-|------|------|---------|
-| 📋 **GTD 看板** | 任务创建、分类、优先级、进度追踪 | 无 |
-| 🍅 **番茄钟** | 25分钟专注计时，可延长/中止 | 无 |
-| 🧙 **配置向导** | 首次启动引导，所有高级功能可选配置 | 无 |
-| 🔄 **周期任务** | 日/周/月自动派发 | 无 |
-| ⚡ **闪电添加** | `Ctrl+Alt+T` 全局快捷键快速录入 | 无 |
-| 📱 **移动推送** | WxPusher 通知到微信 | 需配置凭据 |
-| 🤖 **AI 复盘** | 每日 23:30 毒舌锐评 + 明日规划 | 需 API Key |
-| 🔌 **扩展系统** | 自定义状态栏脚本按钮 | 无 |
+也可用托盘 **设置** 配置（推荐）。
 
 ---
 
-## 🖥️ 跨平台支持
+## 功能一览
 
-| 平台 | 托盘实现 | 状态 |
-|------|---------|------|
-| **Linux (GNOME)** | 原生 GTK AppIndicator 桥接，顶栏文字滚动 + 进度饼图 | ✅ 完美 |
-| **Linux (其他)** | Qt 系统托盘回退 | ✅ 可用 |
-| **macOS** | Qt 标准菜单栏托盘 | ✅ 可用 |
-| **Windows** | Qt 系统通知区域托盘 | ✅ 可用 |
-
-### 快捷键
-
-| 系统 | 快捷键 |
-|------|--------|
-| Linux / Windows | `Ctrl + Alt + T` |
-| macOS | `Cmd + Alt + T` |
-
-> ⚠️ **macOS 用户**：首次使用需在 **系统设置 → 隐私与安全性 → 辅助功能** 中授权终端软件。
+| 功能 | 说明 |
+|------|------|
+| **托盘轮播** | 顶栏任务标题轮播；左侧**优先级饼图**（红/黄/绿，按进度填充） |
+| **番茄钟** | 左：**番茄饼图**（随倒计时填充，带绿萼）；右：倒计时或自定义文案 |
+| **任务** | 新建/编辑/进度(10%步进)/完成/废弃；二级分类、截止、提醒 |
+| **周期任务** | 日/周/月模板自动派发 |
+| **闪电添加** | `Ctrl+Alt+T`（macOS：`Cmd+Alt+T`） |
+| **AI** | **每日计划** + **每日复盘**；多 API 配置（同时启用一个）；毒舌/温柔/干练 + 自定义提示词 |
+| **通知** | 固定渠道：应用弹窗、WxPusher（可同时开） |
+| **主题** | 浅色 / 深色 / 跟随系统 |
 
 ---
 
-## 🏗️ 架构设计
+## 架构（简图）
 
 ```
-main.py
-  └── DI Container (injector)
-        └── TrayController (事件协调)
-              ├── TaskService        → 任务 CRUD / 进度 / 调度
-              ├── PomodoroService    → 番茄钟计时状态
-              ├── ScriptService      → 扩展脚本执行（预留）
-              ├── TrayRenderer       → 托盘 UI 渲染
-              ├── MenuBuilder        → 右键菜单构建
-              └── ExtensionLoader    → 动态插件发现
-                    └── StatusBarExtension（脚本按钮等）
-
-    命令模式
-    ─────────
-    handle_action → dispatch() → ActionCommand.execute()
-        ├── NewTaskCommand
-        ├── DoneCommand
-        ├── PomodoroStartCommand
-        ├── ExtensionCommand
-        └── ...
-
-    存储层
-    ──────
-    TaskRepository (接口)
-        ├── FileTaskRepository      ← 当前
-        └── MySQLTaskRepository     ← 后续
+托盘 (AppIndicator / Qt)
+  ├── 轮播 / 番茄图标与文字
+  └── 菜单 → Vue 对话框 (QWebEngineView)
+                 └── 本机 HTTP API → TaskService / SettingsManager
+后台：Watcher / Reminder / AI 调度 Worker
 ```
 
-### 核心设计原则
-
-- **依赖注入**：所有服务通过 `injector` 容器管理，松耦合可测试
-- **命令模式**：托盘菜单事件通过 `ActionCommand` 分发，易扩展
-- **接口隔离**：`TaskRepository` 抽象存储，可切换 file / mysql 后端
-- **零配置启动**：高级功能按需激活，核心功能始终可用
+业务逻辑在 **Python**；设置与业务弹窗优先 **Vue 3 + Arco Design**（无 `web/dist` 时回退 Qt）。
 
 ---
 
-## 📁 项目结构
-
-```
-my_todo/
-├── pyproject.toml              # 项目元数据与依赖声明
-├── LICENSE                     # MIT License
-├── requirements.txt            # 依赖列表（兼容旧工具）
-├── zentray.spec                # PyInstaller 打包配置
-├── README.md
-│
-├── zentray/
-│   ├── main.py                 # 应用入口
-│   ├── config.py               # 配置管理（零配置友好）
-│   ├── resources.py            # 资源路径管理（dev/pyinstaller 兼容）
-│   ├── dependencies.py         # DI 容器模块配置
-│   ├── di.py                   # 轻量 DI 回退（injector 不可用时）
-│   │
-│   ├── core/
-│   │   ├── models.py           # 数据模型（Task, PeriodicTemplate）
-│   │   ├── scheduler.py        # 加权轮播调度算法
-│   │   ├── repository.py       # Repository 抽象接口
-│   │   └── storage.py          # 旧版 Storage（兼容过渡）
-│   │
-│   ├── repositories/
-│   │   ├── file_repository.py           # JSON 文件存储实现
-│   │   └── file_periodic_repository.py  # 周期模板 JSON 存储
-│   │
-│   ├── services/
-│   │   ├── task_service.py      # 任务管理服务
-│   │   ├── pomodoro_service.py  # 番茄钟服务
-│   │   ├── script_service.py    # 脚本执行服务（预留）
-│   │   ├── notification.py      # 通知客户端
-│   │   ├── ai_review.py         # AI 复盘服务
-│   │   └── system_utils.py      # 系统工具（单例锁、热键监听）
-│   │
-│   ├── ui/
-│   │   ├── controller.py        # 托盘协调者（事件路由）
-│   │   ├── renderer.py          # 托盘渲染器
-│   │   ├── menu_builder.py      # 菜单构建器
-│   │   ├── commands.py          # 命令模式事件处理
-│   │   ├── tray.py              # 跨平台托盘底层实现
-│   │   ├── dialogs.py           # UI 对话框
-│   │   ├── overlay.py           # 闪电添加浮层
-│   │   ├── linux_tray_bridge.py # Linux 原生 GTK 桥接
-│   │   └── extensions/          # 状态栏扩展系统
-│   │       ├── interface.py     # StatusBarExtension 接口
-│   │       └── loader.py        # ExtensionLoader 加载器
-│   │
-│   └── workers/
-│       ├── watcher.py           # 后台巡检（逾期惩罚 + 周期派发）
-│       └── nightly_job.py       # 夜间 AI 复盘
-│
-├── extensions/                  # 用户插件目录
-├── resources/                   # 打包资源（图标等）
-├── tests/                       # 测试套件
-│   ├── conftest.py
-│   └── unit/
-│       ├── test_task_service.py
-│       ├── test_pomodoro_service.py
-│       ├── test_repository.py
-│       └── ...
-└── docs/                        # 设计文档
-```
-
----
-
-## 🧪 开发指南
-
-### 运行测试
+## 打包
 
 ```bash
-pip install -e ".[dev]"
-pytest -v
+cd web && npm ci && npm run build && cd ..
+./scripts/build_package.sh --target linux
+# 产物: dist/releases/zentray_*_amd64.deb
 ```
-
-### 代码风格
-
-```bash
-black zentray/ tests/
-```
-
-### 构建分发包
-
-```bash
-# 安装 PyInstaller
-pip install pyinstaller
-
-# 构建单文件可执行程序
-pyinstaller zentray.spec
-```
-
-平台特定打包：
-
-```bash
-# Linux: 构建 AppImage
-bash scripts/build_linux.sh
-
-# macOS: 构建 DMG
-bash scripts/build_macos.sh
-
-# Windows: 构建 NSIS 安装器
-scripts\build_windows.bat
-```
-
-发布时通过 GitHub Actions 自动构建，详见 `.github/workflows/build.yml`。
 
 ---
 
-## 🔧 配置参考
+## 文档
 
-| 环境变量 | 说明 | 默认值 | 必需 |
-|---------|------|--------|------|
-| `WXPUSHER_APP_TOKEN` | 通知服务 Token | - | 否 |
-| `WXPUSHER_UID` | 通知服务 UID | - | 否 |
-| `AI_API_KEY` | AI API 密钥 | - | 否 |
-| `AI_API_BASE_URL` | AI API 地址 | `https://api.openai.com/v1` | 否 |
-| `AI_MODEL_NAME` | AI 模型名称 | `gpt-4o` | 否 |
-| `STORAGE_BACKEND` | 存储后端 (`file`/`mysql`) | `file` | 否 |
+| 文档 | 内容 |
+|------|------|
+| [docs/USER_MANUAL.md](docs/USER_MANUAL.md) | 分环境安装与使用 |
+| [docs/FRONTEND_VUE.md](docs/FRONTEND_VUE.md) | 前端开发与路由 |
+| [docs/VERSIONING.md](docs/VERSIONING.md) | 版本号规则 |
+| [LICENSE](LICENSE) | MIT |
 
 ---
 
-## 📄 许可证
+## 许可证
 
-MIT License — 详见 [LICENSE](LICENSE) 文件。
-
----
-
-## 🙏 致谢
-
-- [PySide6](https://wiki.qt.io/Qt_for_Python) — Qt for Python 官方绑定
-- [injector](https://github.com/alecthomas/injector) — Python 依赖注入框架
-- [pynput](https://github.com/moses-palmer/pynput) — 跨平台输入监听
+MIT

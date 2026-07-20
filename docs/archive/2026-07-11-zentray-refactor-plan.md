@@ -1,5 +1,9 @@
 # ZenTray Refactor Implementation Plan
 
+> ⚠️ **Superseded / Archived (2026-07-17)**  
+> 进度与后续任务以 [../superpowers/plans/2026-07-17-zentray-remediation-plan.md](../superpowers/plans/2026-07-17-zentray-remediation-plan.md) 为准。  
+> 审查结论见 [../architecture-review-2026-07-17.md](../architecture-review-2026-07-17.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement a fully decoupled and testable architecture for ZenTray using dependency injection and service-oriented design.

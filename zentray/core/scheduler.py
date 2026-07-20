@@ -1,62 +1,176 @@
+import datetime
 import random
 from typing import List, Optional
+
 from zentray.core.models import Task
+
 
 class Scheduler:
     """
-    核心加权滚动算法引擎。
-    负责根据优先级生成轮播队列，并控制暂停/恢复（用于专注模式）。
+    核心轮播调度引擎。
+
+    两阶段轮播：
+      1. 逾期轮播（如果启用）：先轮播完所有逾期任务一次
+      2. 活跃任务轮播：按配置模式（随机/优先级无限轮播）
+
+    逾期前缀仅用于展示（format_display_title），绝不修改 Task 本体。
     """
+
     def __init__(self):
-        self.queue: List[Task] = []
-        self.cursor: int = 0
+        self._overdue_queue: List[Task] = []
+        self._active_queue: List[Task] = []
+        self._overdue_cursor: int = 0
+        self._active_cursor: int = 0
         self.is_paused: bool = False
 
-    def build_queue(self, tasks: List[Task]):
-        self.queue = []
-        self.cursor = 0
+        self.mode: str = "random"
+        self.overdue_enabled: bool = True
+        self.overdue_prefix: str = "【已逾期】"
+
+        self._current: Optional[Task] = None
+        self._overdue_phase_done: bool = False
+
+    def build_queue(self, tasks: List[Task]) -> None:
+        today = datetime.date.today()
+        overdue: List[Task] = []
+        active: List[Task] = []
+
+        for t in tasks:
+            if t.deadline and self._is_overdue(t.deadline, today):
+                overdue.append(t)
+            else:
+                active.append(t)
+
+        self._build_overdue_queue(overdue)
+        self._build_active_queue(active)
+
+        self._overdue_phase_done = False
+        # 保留 focus：若当前任务仍在新队列中则继续；否则清空
+        if self._current is not None:
+            ids = {t.id for t in self._overdue_queue + self._active_queue}
+            if self._current.id not in ids:
+                self._current = None
+
+    def configure(self, mode: str, overdue_enabled: bool, overdue_prefix: str) -> None:
+        self.mode = mode
+        self.overdue_enabled = overdue_enabled
+        self.overdue_prefix = overdue_prefix
+
+    def _build_overdue_queue(self, tasks: List[Task]) -> None:
+        self._overdue_queue.clear()
+        self._overdue_cursor = 0
         if not tasks:
             return
-            
-        temp_list = []
-        for task in tasks:
-            # 权重配置：高优 2x，中低 1x
-            weight = 2 if task.priority == "high" else 1
-            for _ in range(weight):
-                temp_list.append(task)
-                
-        # 穿插打乱算法：将高优任务与中低优任务隔开，防止同类连续霸屏
-        high_tasks = [t for t in temp_list if t.priority == "high"]
-        other_tasks = [t for t in temp_list if t.priority != "high"]
-        
-        random.shuffle(high_tasks)
-        random.shuffle(other_tasks)
-        
-        while high_tasks or other_tasks:
-            if high_tasks:
-                self.queue.append(high_tasks.pop(0))
-            if other_tasks:
-                self.queue.append(other_tasks.pop(0))
+        priority_order = {"high": 0, "medium": 1, "low": 2}
+        self._overdue_queue = sorted(
+            tasks, key=lambda t: priority_order.get(t.priority, 1)
+        )
+
+    def _build_active_queue(self, tasks: List[Task]) -> None:
+        self._active_queue.clear()
+        self._active_cursor = 0
+        if not tasks:
+            return
+
+        if self.mode == "priority_high_first":
+            order = {"high": 0, "medium": 1, "low": 2}
+            self._active_queue = sorted(tasks, key=lambda t: order.get(t.priority, 1))
+
+        elif self.mode == "priority_low_first":
+            order = {"low": 0, "medium": 1, "high": 2}
+            self._active_queue = sorted(tasks, key=lambda t: order.get(t.priority, 1))
+
+        else:  # random — 优先级加权穿插
+            temp = []
+            for t in tasks:
+                weight = 2 if t.priority == "high" else 1
+                for _ in range(weight):
+                    temp.append(t)
+            high_tasks = [t for t in temp if t.priority == "high"]
+            other_tasks = [t for t in temp if t.priority != "high"]
+            random.shuffle(high_tasks)
+            random.shuffle(other_tasks)
+            while high_tasks or other_tasks:
+                if high_tasks:
+                    self._active_queue.append(high_tasks.pop(0))
+                if other_tasks:
+                    self._active_queue.append(other_tasks.pop(0))
 
     def get_next(self) -> Optional[Task]:
-        """获取下一个任务，若队列为空或被暂停（如番茄钟状态），则返回 None"""
-        if self.is_paused or not self.queue:
+        """推进轮播并返回下一个任务"""
+        if self.is_paused:
             return None
-        task = self.queue[self.cursor % len(self.queue)]
-        self.cursor += 1
-        return task
-        
+
+        if self.overdue_enabled and self._overdue_queue and not self._overdue_phase_done:
+            task = self._overdue_queue[self._overdue_cursor]
+            self._overdue_cursor += 1
+            if self._overdue_cursor >= len(self._overdue_queue):
+                self._overdue_phase_done = True
+                self._overdue_cursor = 0
+            self._current = task
+            return task
+
+        if self._active_queue:
+            n = len(self._active_queue)
+            # 多任务时尽量不连续展示同一条（随机加权队列可能相邻重复）
+            for _ in range(n):
+                task = self._active_queue[self._active_cursor % n]
+                self._active_cursor += 1
+                if (
+                    self._current is None
+                    or n == 1
+                    or task.id != self._current.id
+                ):
+                    self._current = task
+                    return task
+            # 全部相同 id 时退回当前项
+            task = self._active_queue[self._active_cursor % n]
+            self._active_cursor += 1
+            self._current = task
+            return task
+
+        self._current = None
+        return None
+
     def get_current(self) -> Optional[Task]:
-        """获取当前正在展示的任务"""
-        if self.is_paused or not self.queue:
+        """获取当前正在展示的任务（原始 Task，无展示前缀）。"""
+        if self.is_paused:
             return None
-        # 因为 get_next 已经让 cursor 步进了，所以当前显示的实际上是 cursor - 1
-        return self.queue[(self.cursor - 1) % len(self.queue)]
-        
-    def pause(self):
-        """挂起轮播，进入专注模式"""
+        return self._current
+
+    def focus(self, task: Task) -> None:
+        """将焦点钉到指定任务，不缩减轮播队列。"""
+        self._current = task
+
+    def format_display_title(self, task: Task) -> str:
+        """返回用于状态栏展示的标题（逾期时加前缀，不修改 task）。"""
+        if (
+            self.overdue_enabled
+            and task.deadline
+            and self._is_overdue(task.deadline, datetime.date.today())
+        ):
+            return f"{self.overdue_prefix}{task.title}"
+        return task.title
+
+    def has_tasks(self) -> bool:
+        return bool(self._overdue_queue) or bool(self._active_queue)
+
+    def reset(self) -> None:
+        self._overdue_cursor = 0
+        self._active_cursor = 0
+        self._overdue_phase_done = False
+        self._current = None
+
+    def pause(self) -> None:
         self.is_paused = True
-        
-    def resume(self):
-        """恢复轮播"""
+
+    def resume(self) -> None:
         self.is_paused = False
+
+    @staticmethod
+    def _is_overdue(deadline_str: str, today: datetime.date) -> bool:
+        try:
+            dl = datetime.date.fromisoformat(deadline_str)
+            return dl < today
+        except (ValueError, TypeError):
+            return False

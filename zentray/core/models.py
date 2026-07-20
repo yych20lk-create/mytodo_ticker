@@ -1,7 +1,10 @@
-from dataclasses import dataclass, field, asdict
-from typing import List, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
 import datetime
 import uuid
+
+from zentray.core.reminder import TaskReminder
+
 
 @dataclass
 class Task:
@@ -10,14 +13,23 @@ class Task:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     details: str = ""
     priority: str = "medium"  # high, medium, low
-    deadline: Optional[str] = None # YYYY-MM-DD
+    deadline: Optional[str] = None  # YYYY-MM-DD
     attachments: List[str] = field(default_factory=list)
-    task_type: str = "one-time" # one-time, periodic_instance
+    task_type: str = "one-time"  # one-time, periodic_instance
     template_id: Optional[str] = None
     overdue_penalty_date: Optional[str] = None
     progress: int = 0  # 0 to 100
-    progress_logs: List[dict] = field(default_factory=list)  # list of {"time": str, "percent": int, "note": str}
-    created_at: str = field(default_factory=lambda: datetime.datetime.now().isoformat())
+    progress_logs: List[dict] = field(default_factory=list)
+    created_at: str = field(
+        default_factory=lambda: datetime.datetime.now().isoformat()
+    )
+    # v3.8 二级分类
+    category_primary_id: Optional[str] = None
+    category_secondary_id: Optional[str] = None
+    # v3.8 弹窗提醒
+    reminder: Optional[TaskReminder] = None
+    # v3.9 逾期自动废弃（常从周期模板继承）
+    auto_abandon_on_overdue: bool = False
 
     def __post_init__(self):
         if self.attachments is None:
@@ -30,29 +42,56 @@ class Task:
             self.title = "Untitled"
         if not self.category:
             self.category = "工作"
-        if getattr(self, 'progress', None) is None:
+        if getattr(self, "progress", None) is None:
             self.progress = 0
-        if getattr(self, 'progress_logs', None) is None:
+        if getattr(self, "progress_logs", None) is None:
             self.progress_logs = []
+        if isinstance(self.reminder, dict):
+            self.reminder = TaskReminder.from_dict(self.reminder)
 
-    def to_dict(self):
-        return asdict(self)
+    def to_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        if self.reminder is not None:
+            d["reminder"] = (
+                self.reminder.to_dict()
+                if hasattr(self.reminder, "to_dict")
+                else self.reminder
+            )
+        else:
+            d["reminder"] = None
+        return d
 
     @classmethod
-    def from_dict(cls, data):
-        # 兼容性处理：仅提取属于该数据类的字段
-        return cls(**{k: v for k, v in data.items() if k in cls.__annotations__})
+    def from_dict(cls, data: dict) -> "Task":
+        known = {k: v for k, v in data.items() if k in cls.__annotations__}
+        if "reminder" in known and isinstance(known["reminder"], dict):
+            known["reminder"] = TaskReminder.from_dict(known["reminder"])
+        return cls(**known)
+
 
 @dataclass
 class PeriodicTemplate:
     base_title: str
     category: str
-    periodicity: str # daily, weekly, monthly
+    periodicity: str  # daily, weekly, monthly
     template_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     details: str = ""
     priority: str = "medium"
     last_generated_period: Optional[str] = None
-    created_at: str = field(default_factory=lambda: datetime.datetime.now().isoformat())
+    created_at: str = field(
+        default_factory=lambda: datetime.datetime.now().isoformat()
+    )
+    category_primary_id: Optional[str] = None
+    category_secondary_id: Optional[str] = None
+    reminder: Optional[TaskReminder] = None
+    # v3.9 调度增强
+    interval: int = 1  # 每 N 天/周/月
+    # 实例截止日期规则：weekly 用 weekday 0=周一..6=周日；monthly 用 day_of_month
+    deadline_weekday: Optional[int] = None
+    deadline_day_of_month: Optional[int] = None
+    auto_abandon_on_overdue: bool = False
+    long_term: bool = True  # True=长期有效；False 时看 schedule_end_date
+    schedule_end_date: Optional[str] = None  # YYYY-MM-DD 停止派发日
 
     def __post_init__(self):
         if self.details is None:
@@ -63,10 +102,28 @@ class PeriodicTemplate:
             self.base_title = "Untitled"
         if not self.category:
             self.category = "工作"
+        if isinstance(self.reminder, dict):
+            self.reminder = TaskReminder.from_dict(self.reminder)
+        try:
+            self.interval = max(1, int(self.interval or 1))
+        except (TypeError, ValueError):
+            self.interval = 1
 
-    def to_dict(self):
-        return asdict(self)
+    def to_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        if self.reminder is not None:
+            d["reminder"] = (
+                self.reminder.to_dict()
+                if hasattr(self.reminder, "to_dict")
+                else self.reminder
+            )
+        else:
+            d["reminder"] = None
+        return d
 
     @classmethod
-    def from_dict(cls, data):
-        return cls(**{k: v for k, v in data.items() if k in cls.__annotations__})
+    def from_dict(cls, data: dict) -> "PeriodicTemplate":
+        known = {k: v for k, v in data.items() if k in cls.__annotations__}
+        if "reminder" in known and isinstance(known["reminder"], dict):
+            known["reminder"] = TaskReminder.from_dict(known["reminder"])
+        return cls(**known)

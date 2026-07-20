@@ -4,9 +4,10 @@ __pycache__/
 *.so
 .Python
 env/
-build/
+# 仅忽略仓库根目录构建产物（勿用无前缀 dist/，否则会误伤 web/dist）
+/build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
@@ -23,9 +24,9 @@ var/
 venv/
 ENV/
 
-# PyInstaller 打包产物
-build/
-dist/
+# PyInstaller 打包产物（仅仓库根目录，避免忽略 web/dist）
+/build/
+/dist/
 *.spec.bak
 
 # macOS
@@ -40,6 +41,20 @@ Thumbs.db
 
 # 用户本地数据（不提交）
 *.local.json
+*.log
 
 # Codegraph 运行时文件
-.codegraph/daemon.pid
+.codegraph/
+
+# Claude Code / Agent 本地配置
+.agent/
+.claude/
+
+# 测试缓存
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 前端
+web/node_modules/
+# web/dist 随源码提交，便于无 Node 环境直接打包

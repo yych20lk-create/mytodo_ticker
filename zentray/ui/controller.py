@@ -2,13 +2,18 @@
 """
 托盘协调者 —— 事件路由 + 状态协调 + 扩展管理。
 
-将原 TrayManager 拆分为：
-  - TrayController（本文件）：协调者，负责事件路由
-  - TrayRenderer：封装托盘底层渲染
-  - MenuBuilder：负责菜单结构生成
+产品行为：
+  - 无主窗口，仅顶栏托盘
+  - 启动：先只显示应用图标
+  - 首个任务进入轮播后：饼图 + 文字标题
 """
+from __future__ import annotations
+
+import logging
+
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication
+
 from zentray.services.task_service import TaskService
 from zentray.services.pomodoro_service import PomodoroService
 from zentray.services.script_service import ScriptService
@@ -16,7 +21,8 @@ from zentray.services.settings_manager import SettingsManager
 from zentray.ui.renderer import TrayRenderer
 from zentray.ui.menu_builder import MenuBuilder
 from zentray.ui.extensions.loader import ExtensionLoader
-from zentray.config import POLLING_INTERVAL_MS
+
+logger = logging.getLogger(__name__)
 
 
 class TrayController(QObject):
@@ -41,126 +47,220 @@ class TrayController(QObject):
         self.menu_builder = menu_builder
         self.extension_loader = extension_loader
 
-        # 设置管理器
         self._settings = SettingsManager()
-
-        # 加载扩展
         self.extensions = self.extension_loader.load_all()
+        self._poll_count = 0
+        self._last_label = None  # None = 尚未推送过
+        self._last_icon = None
+        # 启动阶段：仅应用图标，等首次轮播 tick 再显示饼图+标题
+        self._carousel_started = False
 
-        # 连接番茄钟信号
+        self.renderer.backend.action_received.connect(self.handle_action)
         self.pomodoro_service.time_updated.connect(self._on_pomodoro_tick)
         self.pomodoro_service.pomodoro_finished.connect(self._on_pomodoro_end)
-
-        # 连接脚本日志信号
         self.script_service.log_updated.connect(self._on_script_log)
+        self.script_service.script_finished.connect(self._on_script_finished)
 
-        # 动态轮播定时器（根据当前任务优先级调整间隔）
-        self.poll_timer = QTimer()
-        self.poll_timer.setSingleShot(True)  # 单次触发，每次手动重新启动
+        # 可靠轮播：重复定时器（挂到 self，避免被 GC）
+        self.poll_timer = QTimer(self)
+        try:
+            from PySide6.QtCore import Qt as _Qt
+
+            self.poll_timer.setTimerType(_Qt.TimerType.PreciseTimer)
+        except Exception:
+            pass
         self.poll_timer.timeout.connect(self._on_poll_tick)
 
-        # 启动首次轮播
-        self._schedule_next_poll(delay_ms=500)
+        # 预选中任务（内部焦点），但顶栏仍保持「仅 app 图标」直到首轮轮播
+        if self.task_service.get_current_task() is None:
+            self.task_service.advance_rotation()
 
-        # 应用退出时关闭托盘
-        self.app.aboutToQuit.connect(self.renderer.shutdown)
+        # 启动占位：应用图标、无标题；菜单先建好
+        self._show_boot_placeholder(update_menu=True)
+        self.start_rotation()
+
+        self.app.aboutToQuit.connect(self._on_about_to_quit)
 
     # ==========================================
-    # 事件路由
+    # 轮播控制
     # ==========================================
+
+    def _show_boot_placeholder(self, update_menu: bool = True) -> None:
+        """初始化：仅应用图标，不显示任务饼图/标题。"""
+        self.renderer.set_state("app_icon", "")
+        self._last_icon = "app_icon"
+        self._last_label = ""
+        logger.info("启动占位：仅应用图标，等待首个任务轮播")
+        if update_menu:
+            self._refresh_menu()
+
+    def start_rotation(self) -> None:
+        """按设置启动/重置轮播定时器。"""
+        interval_ms = self._next_interval_ms()
+        if self.poll_timer.isActive():
+            self.poll_timer.stop()
+        self.poll_timer.start(interval_ms)
+        logger.info("轮播定时器已启动，间隔 %sms", interval_ms)
+
+    def _next_interval_ms(self) -> int:
+        task = self.task_service.get_current_task()
+        if task:
+            sec = self._settings.get_dwell_seconds(task.priority)
+        else:
+            sec = 3
+        # 至少 1.5 秒，保证肉眼能看到标题切换
+        return max(1500, int(sec * 1000))
 
     def handle_action(self, action_id: str) -> None:
-        """中央事件路由 —— 通过命令模式分发"""
         from .commands import dispatch
 
         if not dispatch(action_id, self):
-            pass  # 未识别的命令
-
-    # ==========================================
-    # 动态轮播
-    # ==========================================
+            logger.debug("未识别的菜单 action: %s", action_id)
 
     def _on_poll_tick(self) -> None:
-        """定时器触发：更新显示后，根据当前任务优先级调度下一次"""
-        self._update_display()
+        """定时推进轮播并刷新顶栏标题。"""
+        try:
+            if self.pomodoro_service.is_active:
+                if not self._carousel_started:
+                    self._carousel_started = True
+                    logger.info("首个轮播开始（番茄模式）")
+                self.update_display(update_menu=False)
+                return
 
-        # 根据当前任务优先级决定下次间隔
-        task = self.task_service.get_current_task()
-        if task:
-            dwell_seconds = self._settings.get_dwell_seconds(task.priority)
-        else:
-            dwell_seconds = 3  # 无任务时默认 3 秒
+            # 首次 tick：进入轮播展示（饼图 + 标题），再推进
+            if not self._carousel_started:
+                self._carousel_started = True
+                # 确保有当前任务
+                if self.task_service.get_current_task() is None:
+                    self.task_service.advance_rotation()
+                logger.info(
+                    "首个任务开始轮播: %s",
+                    getattr(self.task_service.get_current_task(), "title", None),
+                )
+                self.update_display(update_menu=False)
+                self.poll_timer.setInterval(self._next_interval_ms())
+                return
 
-        self._schedule_next_poll(dwell_seconds * 1000)
+            prev = self.task_service.get_current_task()
+            nxt = self.task_service.advance_rotation()
+            self._poll_count += 1
+            prev_t = prev.title if prev else None
+            next_t = nxt.title if nxt else None
+            if prev_t != next_t or self._poll_count <= 3:
+                logger.info("轮播 #%s: %s -> %s", self._poll_count, prev_t, next_t)
+            self.update_display(update_menu=False)
 
-    def _schedule_next_poll(self, delay_ms: int) -> None:
-        """安排下一次轮播刷新"""
-        self.poll_timer.start(delay_ms)
-
-    # ==========================================
-    # 设置应用
-    # ==========================================
+            self.poll_timer.setInterval(self._next_interval_ms())
+        except Exception:
+            logger.exception("轮播 tick 失败")
+            self.poll_timer.setInterval(3000)
 
     def apply_settings(self) -> None:
-        """重新加载设置并应用到各服务（设置对话框保存后调用）"""
-        # 重建 SettingsManager 单例以刷新缓存
-        SettingsManager._instance = None
-        self._settings = SettingsManager()
+        self._settings = SettingsManager.reload()
+        # 空闲时同步专注时长；进行中不打断当前倒计时
+        if hasattr(self.pomodoro_service, "sync_duration_from_settings"):
+            self.pomodoro_service.sync_duration_from_settings()
+        else:
+            if not self.pomodoro_service.is_active:
+                self.pomodoro_service.duration = (
+                    self._settings.pomodoro.duration_minutes * 60
+                )
+        self.task_service.refresh_scheduler()
+        if self.task_service.get_current_task() is None:
+            self.task_service.advance_rotation()
+        # 设置已在运行中：直接正常展示
+        self._carousel_started = True
+        self.update_display(update_menu=True)
+        self.start_rotation()
 
-        # 更新番茄钟服务时长
-        self.pomodoro_service.duration = self._settings.pomodoro.duration_minutes * 60
+    def update_display(self, update_menu: bool = True) -> None:
+        """更新顶栏：左侧优先级/番茄饼图 + 标题或倒计时。"""
+        from zentray.resources import tray_pie_icon_name, tray_tomato_icon_name
 
-        # 立即触发一次显示更新
-        self._update_display()
+        # 启动阶段未进入轮播：强制仅应用图标
+        if not self._carousel_started and not self.pomodoro_service.is_active:
+            self._show_boot_placeholder(update_menu=update_menu)
+            return
 
-    # ==========================================
-    # 显示更新
-    # ==========================================
-
-    def _update_display(self) -> None:
-        """更新状态栏显示"""
         if self.pomodoro_service.is_active:
-            mins = self.pomodoro_service.get_remaining() // 60
-            self.renderer.set_text(f"🍅 专注中 {mins}分钟")
+            # 左侧：随倒计时填充的番茄饼图；右侧：文案或倒计时
+            pct = self.pomodoro_service.get_elapsed_progress_percent()
+            icon = tray_tomato_icon_name(pct)
+            rem = self.pomodoro_service.get_remaining()
+            pomo = self._settings.pomodoro
+            mode = getattr(pomo, "tray_display", "countdown") or "countdown"
+            if mode == "text":
+                text = (getattr(pomo, "tray_text", None) or "专注中").strip() or "专注中"
+            else:
+                text = f"{rem // 60:02d}:{rem % 60:02d}"
         else:
             task = self.task_service.get_current_task()
             if task:
-                self.renderer.set_text(task.title)
-                progress = getattr(task, "progress", 0)
-                self.renderer.set_icon(
-                    f"pie_{task.priority}_{(progress // 10) * 10}"
-                )
+                icon = tray_pie_icon_name(task.priority, getattr(task, "progress", 0))
+                text = self.task_service.get_task_display_title(task)
+                if not text:
+                    text = task.title or "ZenTray"
             else:
-                self.renderer.set_text("🎉 暂无待办")
+                icon = "app_icon"
+                text = "ZenTray · 暂无待办"
 
-        # 刷新菜单
+        # 原子推送图标+标题，避免换饼图时丢文字
+        if icon != self._last_icon or text != self._last_label:
+            logger.debug("顶栏 state: icon=%s text=%s", icon, text)
+        self.renderer.set_state(icon, text)
+        self._last_icon = icon
+        self._last_label = text
+
+        if update_menu:
+            self._refresh_menu()
+
+    def _refresh_menu(self) -> None:
         task = self.task_service.get_current_task()
-        tasks = self.task_service.get_all_tasks()
         items = self.menu_builder.build_main_menu(
             task_exists=task is not None,
             is_pomodoro=self.pomodoro_service.is_active,
-            tasks=tasks,
-            current_task=task,
             extensions=self.extensions,
         )
         if self.menu_builder.should_update(items):
             self.renderer.update_menu(items)
 
     def reload_data(self) -> None:
-        """重新加载数据并刷新显示（供外部调用）"""
         self.task_service.refresh_scheduler()
-        self._update_display()
-
-    # ==========================================
-    # 信号回调
-    # ==========================================
+        if self.task_service.get_current_task() is None:
+            self.task_service.advance_rotation()
+        # 数据刷新时若已在轮播，保持；否则仍等 tick
+        if self._carousel_started:
+            self.update_display(update_menu=True)
+        else:
+            self._show_boot_placeholder(update_menu=True)
+        if not self.poll_timer.isActive():
+            self.start_rotation()
 
     def _on_pomodoro_tick(self, seconds: int) -> None:
-        self._update_display()
+        if not self._carousel_started:
+            self._carousel_started = True
+        self.update_display(update_menu=False)
 
     def _on_pomodoro_end(self) -> None:
         self.renderer.show_notification("专注结束", "番茄钟已完成，休息一下吧！")
+        self._carousel_started = True
+        self.update_display(update_menu=True)
+        self.start_rotation()
 
     def _on_script_log(self, log: str) -> None:
-        """脚本日志回调：短暂显示在状态栏"""
-        self.renderer.set_text(log[:50])
+        if self._carousel_started:
+            self.renderer.set_text(log[:50])
+
+    def _on_script_finished(self, name: str, success: bool) -> None:
+        status = "执行成功" if success else "执行失败"
+        self.renderer.show_notification(f"脚本: {name}", status)
+
+    def _on_about_to_quit(self) -> None:
+        try:
+            self.poll_timer.stop()
+        except Exception:
+            pass
+        try:
+            self.renderer.shutdown()
+        except Exception:
+            pass

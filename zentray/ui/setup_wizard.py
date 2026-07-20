@@ -22,18 +22,28 @@ class SetupWizard(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("欢迎使用 ZenTray — 初始配置")
-        self.setMinimumSize(520, 420)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        from zentray.ui.dialog_utils import fit_dialog, center_dialog, style_action_button
 
-        self.env_path = Path(__file__).parent.parent.parent / ".env"
+        fit_dialog(self, preferred_w=640, preferred_h=420, min_w=520, min_h=320)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self._style_btn = style_action_button
+
+        from zentray.config import DATA_DIR, _PROJECT_ROOT
+
+        # 优先写入用户数据目录；开发环境额外尝试项目根 .env
+        self.data_dir = DATA_DIR
+        self.user_env_path = DATA_DIR / ".env"
+        self.project_env_path = _PROJECT_ROOT / ".env"
+        self.setup_marker = DATA_DIR / ".setup_done"
         self._config_data = {}
 
         self.init_ui()
+        center_dialog(self)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(24, 20, 24, 16)
+        layout.setSpacing(14)
 
         # 标题
         title = QLabel("🚀 欢迎使用 ZenTray")
@@ -58,16 +68,22 @@ class SetupWizard(QDialog):
         self.stack.addWidget(self._ai_page())
         self.stack.addWidget(self._finish_page())
 
-        # 底部按钮
+        # 底部按钮（横排，保证文字完整）
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        self.btn_skip_all = self._style_btn(QPushButton("⏭️ 跳过全部"), min_w=110)
+        self.btn_skip_all.clicked.connect(self._skip_all)
+        btn_layout.addWidget(self.btn_skip_all)
+
         btn_layout.addStretch()
 
-        self.btn_back = QPushButton("← 上一步")
+        self.btn_back = self._style_btn(QPushButton("← 上一步"), min_w=100)
         self.btn_back.clicked.connect(self._go_back)
         self.btn_back.setVisible(False)
         btn_layout.addWidget(self.btn_back)
 
-        self.btn_next = QPushButton("下一步 →")
+        self.btn_next = self._style_btn(QPushButton("下一步 →"), min_w=110)
         self.btn_next.setDefault(True)
         self.btn_next.clicked.connect(self._go_next)
         btn_layout.addWidget(self.btn_next)
@@ -264,9 +280,30 @@ class SetupWizard(QDialog):
             )
             self.finish_detail.setText("\n".join(parts))
 
+    def _mark_setup_done(self) -> None:
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            self.setup_marker.write_text("ok\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    def _skip_all(self) -> None:
+        """跳过全部可选配置，写入完成标记后进入主程序。"""
+        self._mark_setup_done()
+        self.accept()
+
+    def reject(self) -> None:
+        """关闭窗口也视为完成向导，避免反复弹出。"""
+        self._mark_setup_done()
+        super().reject()
+
+    def closeEvent(self, event) -> None:
+        self._mark_setup_done()
+        super().closeEvent(event)
+
     def _save_and_accept(self):
-        """保存配置到 .env 文件"""
-        lines = []
+        """保存配置到 SettingsManager + 用户数据目录 .env，并打完成标记。"""
+        from zentray.services.settings_manager import SettingsManager
 
         wx_token = self.wx_token.text().strip()
         wx_uid = self.wx_uid.text().strip()
@@ -274,6 +311,20 @@ class SetupWizard(QDialog):
         ai_base = self.ai_base.text().strip()
         ai_model = self.ai_model.text().strip()
 
+        sm = SettingsManager.reload()
+        if wx_token:
+            sm.notification.wxpusher_app_token = wx_token
+        if wx_uid:
+            sm.notification.wxpusher_uid = wx_uid
+        if ai_key:
+            sm.ai.api_key = ai_key
+        if ai_base:
+            sm.ai.base_url = ai_base
+        if ai_model:
+            sm.ai.model = ai_model
+        sm.save()
+
+        lines = []
         if wx_token:
             lines.append(f"WXPUSHER_APP_TOKEN={wx_token}")
         if wx_uid:
@@ -284,21 +335,41 @@ class SetupWizard(QDialog):
             lines.append(f"AI_API_BASE_URL={ai_base}")
         if ai_model:
             lines.append(f"AI_MODEL_NAME={ai_model}")
+        content = (
+            "\n".join(lines) + "\n"
+            if lines
+            else "# ZenTray 配置文件\n# 可选功能凭据请参见 README\n"
+        )
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            self.user_env_path.write_text(content, encoding="utf-8")
+        except OSError:
+            pass
+        try:
+            if not self.project_env_path.exists():
+                self.project_env_path.write_text(content, encoding="utf-8")
+        except OSError:
+            pass
 
-        if lines and not self.env_path.exists():
-            with open(self.env_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
-
+        self._mark_setup_done()
         self.accept()
 
 
 def should_show_wizard() -> bool:
-    """检查是否需要显示配置向导（首次运行无 .env 文件）"""
-    env_path = Path(__file__).parent.parent.parent / ".env"
-    return not env_path.exists()
+    """首次运行且尚未完成向导时显示。"""
+    from zentray.config import DATA_DIR
+
+    marker = DATA_DIR / ".setup_done"
+    if marker.exists():
+        return False
+    # 若用户已通过 settings.json 配置过，也视为完成
+    if (DATA_DIR / "settings.json").exists():
+        return False
+    return True
 
 
 def show_setup_wizard(parent=None) -> bool:
     """显示配置向导，返回 True 表示用户完成配置"""
     wizard = SetupWizard(parent)
     return wizard.exec() == QDialog.Accepted
+

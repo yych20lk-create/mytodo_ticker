@@ -1,44 +1,68 @@
 # tests/conftest.py
 """
-pytest 配置文件 —— 提供测试夹具 (fixtures)。
-
-为单元测试提供 DI 容器、Repository、Service 等共享实例。
+pytest 配置 —— 隔离数据目录，避免污染用户真实数据。
 """
+import os
 import pytest
-from zentray.dependencies import injector
-from zentray.core.repository import TaskRepository, PeriodicTemplateRepository
-from zentray.services.task_service import TaskService
-from zentray.services.pomodoro_service import PomodoroService
+from pathlib import Path
+
 from zentray.core.models import Task
+from zentray.core.scheduler import Scheduler
+from zentray.repositories.file_repository import FileTaskRepository
+from zentray.repositories.file_periodic_repository import FilePeriodicTemplateRepository
+from zentray.services.task_service import TaskService
 
 
 @pytest.fixture
-def task_repo() -> TaskRepository:
-    """获取注入的 TaskRepository"""
-    return injector.get(TaskRepository)
+def tmp_data_dir(tmp_path, monkeypatch):
+    """将 DATA_DIR 与相关路径指到临时目录。"""
+    data = tmp_path / "data"
+    data.mkdir()
+    archive = data / "archive"
+    archive.mkdir()
+
+    monkeypatch.setattr("zentray.config.DATA_DIR", data)
+    monkeypatch.setattr("zentray.config.ACTIVE_TASKS_FILE", data / "active_tasks.json")
+    monkeypatch.setattr(
+        "zentray.config.PERIODIC_TEMPLATES_FILE", data / "periodic_templates.json"
+    )
+    monkeypatch.setattr("zentray.config.ARCHIVE_DIR", archive)
+    monkeypatch.setattr(
+        "zentray.services.settings_manager.SETTINGS_FILE", data / "settings.json"
+    )
+    monkeypatch.setattr(
+        "zentray.services.settings_manager.DATA_DIR", data
+    )
+
+    # 重置 SettingsManager 单例
+    from zentray.services.settings_manager import SettingsManager
+
+    SettingsManager._instance = None
+    return data
 
 
 @pytest.fixture
-def template_repo() -> PeriodicTemplateRepository:
-    """获取注入的 PeriodicTemplateRepository"""
-    return injector.get(PeriodicTemplateRepository)
+def task_repo(tmp_data_dir):
+    return FileTaskRepository(
+        active_file=tmp_data_dir / "active_tasks.json",
+        archive_dir=tmp_data_dir / "archive",
+    )
 
 
 @pytest.fixture
-def task_service() -> TaskService:
-    """获取注入的 TaskService"""
-    return injector.get(TaskService)
+def template_repo(tmp_data_dir):
+    return FilePeriodicTemplateRepository(
+        filepath=tmp_data_dir / "periodic_templates.json"
+    )
 
 
 @pytest.fixture
-def pomodoro_service() -> PomodoroService:
-    """获取注入的 PomodoroService"""
-    return injector.get(PomodoroService)
+def task_service(task_repo, template_repo):
+    return TaskService(task_repo, template_repo, Scheduler())
 
 
 @pytest.fixture
 def sample_task() -> Task:
-    """创建一个示例任务对象"""
     return Task(
         title="测试任务",
         category="工作",

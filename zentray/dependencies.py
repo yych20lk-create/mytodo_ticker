@@ -3,12 +3,12 @@
 依赖注入模块配置。
 
 优先级：标准 injector 库 > 自定义 di.py 回退。
-当 pip install zentray 时，injector 作为依赖自动安装。
 """
 try:
     from injector import Module, provider, singleton, Injector
 except ImportError:
     from zentray.di import Module, provider, singleton, Injector
+
 from zentray.core.repository import TaskRepository, PeriodicTemplateRepository
 from zentray.repositories.file_repository import FileTaskRepository
 from zentray.repositories.file_periodic_repository import FilePeriodicTemplateRepository
@@ -34,7 +34,6 @@ class AppModule(Module):
     @singleton
     def provide_task_repository(self) -> TaskRepository:
         if STORAGE_BACKEND == "mysql":
-            # 后续实现：MySQLTaskRepository
             raise NotImplementedError("MySQL 存储后端尚未实现")
         return FileTaskRepository()
 
@@ -56,7 +55,14 @@ class AppModule(Module):
     @provider
     @singleton
     def provide_pomodoro_service(self) -> PomodoroService:
-        return PomodoroService()
+        # 初始时长来自 settings，而非写死 config 常量
+        try:
+            from zentray.services.settings_manager import SettingsManager
+
+            mins = SettingsManager().pomodoro.duration_minutes
+            return PomodoroService(mins)
+        except Exception:
+            return PomodoroService()
 
     @provider
     @singleton
@@ -78,31 +84,28 @@ class AppModule(Module):
 injector = Injector([AppModule()])
 
 
-# ==========================================
-# 延迟绑定：需要在 QApplication 创建后初始化
-# ==========================================
-
 def init_tray_renderer(app) -> TrayRenderer:
-    """在 QApplication 创建后初始化托盘渲染器"""
+    """在 QApplication 创建后初始化托盘渲染器。"""
     from zentray.ui.tray import create_tray_backend
-    from zentray.di import _Binding
 
     backend = create_tray_backend(app)
     renderer = TrayRenderer(backend)
 
-    # 注册到 injector
-    def _get_renderer():
-        return renderer
-    _get_renderer._is_provider = True
-    _get_renderer._return_type = TrayRenderer
-    _get_renderer._is_singleton = True
-    injector._bindings[TrayRenderer] = _Binding(_get_renderer, is_singleton=True)
+    # 若使用真实 injector，尝试注册实例（失败不影响启动）
+    try:
+        from injector import InstanceProvider, singleton as singleton_scope
+
+        injector.binder.bind(
+            TrayRenderer, to=InstanceProvider(renderer), scope=singleton_scope
+        )
+    except Exception:
+        pass
 
     return renderer
 
 
 def init_tray_controller(app) -> "TrayController":
-    """在 QApplication 和 TrayRenderer 创建后初始化 TrayController"""
+    """在 QApplication 和 TrayRenderer 创建后初始化 TrayController。"""
     from zentray.ui.controller import TrayController
 
     task_service = injector.get(TaskService)
@@ -110,7 +113,6 @@ def init_tray_controller(app) -> "TrayController":
     script_service = injector.get(ScriptService)
     menu_builder = injector.get(MenuBuilder)
     extension_loader = injector.get(ExtensionLoader)
-
     renderer = init_tray_renderer(app)
 
     controller = TrayController(

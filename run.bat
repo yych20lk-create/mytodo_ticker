@@ -1,5 +1,5 @@
 @echo off
-REM ZenTray 快速启动脚本 (Windows)
+REM ZenTray 开发态快速启动 (Windows)
 
 cd /d "%~dp0"
 
@@ -8,13 +8,10 @@ IF NOT EXIST "venv" (
     python -m venv venv
     call venv\Scripts\activate.bat
     echo 安装依赖...
-    pip install -r requirements.txt
+    pip install -e ".[dev]"
 ) ELSE (
     call venv\Scripts\activate.bat
 )
-
-echo 启动本地通知公共服务...
-start "" venv\Scripts\pythonw.exe ..\notification_service\main.py
 
 echo 启动 ZenTray...
 start "" venv\Scripts\pythonw.exe zentray\main.py

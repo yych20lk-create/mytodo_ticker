@@ -1,5 +1,5 @@
+# 与 pyproject.toml 主依赖对齐（无 venv 时的简易安装）
 PySide6>=6.6.0
 requests>=2.31.0
-openai>=1.12.0
 pynput>=1.7.6
 injector>=0.21.0

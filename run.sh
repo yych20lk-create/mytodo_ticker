@@ -1,21 +1,18 @@
 #!/bin/bash
-# ZenTray 快速启动脚本
+# ZenTray 开发态快速启动
 
-# 进入项目根目录
+set -euo pipefail
 cd "$(dirname "$0")"
 
-# 如果存在 .env 文件，则加载其中的环境变量配置 (如 AI_API_KEY 等)
 if [ -f ".env" ]; then
-    export $(grep -v '^#' .env | xargs)
+    # shellcheck disable=SC2046
+    export $(grep -v '^#' .env | xargs) || true
 fi
 
-# 检查虚拟环境是否已经存在
 if [ -f "venv/bin/python3" ]; then
     PYTHON_CMD="venv/bin/python3"
 elif command -v python3 >/dev/null 2>&1; then
     PYTHON_CMD="python3"
-elif command -v python >/dev/null 2>&1; then
-    PYTHON_CMD="python"
 else
     echo "未找到 Python3，请先安装。"
     exit 1
@@ -23,24 +20,21 @@ fi
 
 if [ ! -d "venv" ]; then
     echo "初始化虚拟环境..."
-    $PYTHON_CMD -m venv venv
+    "$PYTHON_CMD" -m venv venv
+    # shellcheck disable=SC1091
     source venv/bin/activate
     echo "安装依赖..."
-    pip install -r requirements.txt
+    pip install -e ".[dev]"
 else
+    # shellcheck disable=SC1091
     source venv/bin/activate
 fi
 
-# 清理可能残留的旧进程，防止端口或资源被占用
 echo "清理旧进程..."
-pkill -f "notification_service/main.py" || true
-pkill -f "zentray/main.py" || true
-pkill -f "linux_tray_bridge.py" || true
+pkill -f "zentray/main.py" 2>/dev/null || true
+pkill -f "[Zz]enTray" 2>/dev/null || true
+pkill -f "linux_tray_bridge.py" 2>/dev/null || true
+sleep 0.3
 
-# 启动通知服务 (在后台，指向平级的 peer 目录)
-echo "启动本地通知公共服务..."
-nohup venv/bin/python ../notification_service/main.py > /dev/null 2>&1 &
-
-# 启动程序
 echo "启动 ZenTray..."
-nohup venv/bin/python zentray/main.py > /dev/null 2>&1 &
+exec venv/bin/python zentray/main.py

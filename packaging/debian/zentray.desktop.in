@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=ZenTray
+GenericName=Task Manager
+Comment=跨平台个人效率工具 — 待办管理 + 番茄钟 + AI 复盘（托盘常驻）
+Exec=/usr/bin/zentray
+Icon=zentray
+Terminal=false
+Categories=Utility;
+StartupNotify=false
+StartupWMClass=ZenTray
+Keywords=todo;pomodoro;gtd;tray;

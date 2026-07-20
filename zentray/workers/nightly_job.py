@@ -1,78 +1,248 @@
 import datetime
+import logging
 import time
+
 from PySide6.QtCore import QThread, Signal
+
+from zentray.config import ARCHIVE_DIR, DATA_DIR
 from zentray.core.repository import TaskRepository
 from zentray.services.ai_review import AIReviewService
 from zentray.services.notification import NotificationClient
-from zentray.config import ARCHIVE_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class NightlyJobWorker(QThread):
     """
-    深夜打更人：独立线程在每日 23:30 处理历史存档解析，
-    连接 AI 大模型，并将精美战报推送到手机。
+    调度：每日计划 + 每日复盘（各自开关与时间）。
     """
-    job_completed = Signal(str)  # 当夜间复盘完成时通知主线程
+
+    job_completed = Signal(str, str)  # title, message
 
     def __init__(self, task_repo: TaskRepository):
         super().__init__()
         self.is_running = True
-        self.last_run_date = None
         self.task_repo = task_repo
+        # 分别记录上次执行日
+        self.last_plan_date = None
+        self.last_review_date = None
 
     def run(self):
         while self.is_running:
             now = datetime.datetime.now()
             today_str = now.strftime("%Y-%m-%d")
 
-            # 从设置中读取触发时间
+            from zentray.core.holidays import should_skip_auto_review
             from zentray.services.settings_manager import SettingsManager
-            settings = SettingsManager()
-            trigger_hour = settings.nightly.trigger_hour
-            trigger_minute = settings.nightly.trigger_minute
 
-            # 定时触发器：到达设定时间且今日尚未执行
-            if (now.hour == trigger_hour and now.minute >= trigger_minute
-                    and self.last_run_date != today_str):
-                self._execute_nightly_review(today_str)
-                self.last_run_date = today_str
+            settings = SettingsManager()
+            ai = settings.ai
+
+            # —— 每日计划 ——
+            plan = ai.plan
+            if (
+                plan.enabled
+                and self.last_plan_date != today_str
+                and now.hour == int(plan.trigger_hour)
+                and now.minute >= int(plan.trigger_minute)
+            ):
+                if should_skip_auto_review(
+                    now.date(),
+                    skip_weekends=bool(plan.skip_weekends),
+                    skip_holidays=bool(plan.skip_holidays),
+                ):
+                    self.last_plan_date = today_str
+                    logger.info("每日计划已跳过（周末/节假日）: %s", today_str)
+                else:
+                    self._run_plan(today_str)
+                    self.last_plan_date = today_str
+
+            # —— 每日复盘 ——
+            review = ai.review
+            if (
+                review.enabled
+                and self.last_review_date != today_str
+                and now.hour == int(review.trigger_hour)
+                and now.minute >= int(review.trigger_minute)
+            ):
+                if should_skip_auto_review(
+                    now.date(),
+                    skip_weekends=bool(review.skip_weekends),
+                    skip_holidays=bool(review.skip_holidays),
+                ):
+                    self.last_review_date = today_str
+                    logger.info("每日复盘已跳过（周末/节假日）: %s", today_str)
+                else:
+                    self._run_review(today_str)
+                    self.last_review_date = today_str
 
             for _ in range(60):
                 if not self.is_running:
                     break
                 time.sleep(1)
 
-    def _execute_nightly_review(self, today_str: str):
+    def _run_plan(self, today_str: str):
         try:
-            execute_nightly_review(today_str, self.task_repo)
-            # 通知主进程 UI
-            self.job_completed.emit("夜间复盘已生成并发送至微信。")
+            ok = execute_daily_plan(today_str, self.task_repo)
+            if ok:
+                self.job_completed.emit("每日计划", "今日计划已生成。")
+            else:
+                self.job_completed.emit(
+                    "每日计划",
+                    "计划已执行，推送可能失败；请查看本地 reviews/。",
+                )
         except Exception as e:
-            print(f"Nightly Job Error: {e}")
+            logger.exception("Daily plan error: %s", e)
+
+    def _run_review(self, today_str: str):
+        try:
+            ok = execute_nightly_review(today_str, self.task_repo)
+            if ok:
+                self.job_completed.emit("每日复盘", "复盘已生成。")
+            else:
+                self.job_completed.emit(
+                    "每日复盘",
+                    "复盘已执行，推送可能失败；请查看本地 reviews/。",
+                )
+        except Exception as e:
+            logger.exception("Nightly review error: %s", e)
 
     def stop(self):
         self.is_running = False
         self.wait()
 
 
-def execute_nightly_review(today_str: str, task_repo: TaskRepository):
+def _next_report_filename(kind: str, today_str: str) -> tuple[str, int]:
+    """
+    同一天可多次计划/复盘，用自增序号区分。
+    返回 (filename, seq)。
+    plan  → plan-YYYY-MM-DD.md / plan-YYYY-MM-DD-2.md
+    review→ review-YYYY-MM-DD.md / review-YYYY-MM-DD-2.md
+            （兼容旧名 YYYY-MM-DD.md 计为 #1）
+    """
+    reviews = DATA_DIR / "reviews"
+    reviews.mkdir(parents=True, exist_ok=True)
+    if kind == "plan":
+        base = f"plan-{today_str}"
+        legacy = None
+    else:
+        base = f"review-{today_str}"
+        legacy = f"{today_str}.md"
+
+    existing = 0
+    for p in reviews.iterdir():
+        if not p.is_file():
+            continue
+        name = p.name
+        if legacy and name == legacy:
+            existing = max(existing, 1)
+            continue
+        if name == f"{base}.md":
+            existing = max(existing, 1)
+            continue
+        # base-N.md
+        prefix = f"{base}-"
+        if name.startswith(prefix) and name.endswith(".md"):
+            mid = name[len(prefix) : -3]
+            if mid.isdigit():
+                existing = max(existing, int(mid))
+    seq = existing + 1
+    if seq <= 1:
+        return f"{base}.md", 1
+    return f"{base}-{seq}.md", seq
+
+
+def _notify_and_save(
+    title: str,
+    report: str,
+    *,
+    save_local: bool,
+    filename: str,
+) -> bool:
+    if save_local:
+        reviews = DATA_DIR / "reviews"
+        reviews.mkdir(parents=True, exist_ok=True)
+        path = reviews / filename
+        try:
+            path.write_text(report, encoding="utf-8")
+        except OSError as e:
+            logger.warning("save review failed: %s", e)
+
+    client = NotificationClient.from_settings()
+    result = client.send(title, report)
+    # 应用弹窗由 job_completed 信号触发托盘通知
+    return result.get("status") == "ok" or result.get("app_popup")
+
+
+def execute_daily_plan(today_str: str, task_repo: TaskRepository) -> bool:
+    """生成每日计划。"""
+    from zentray.services.settings_manager import SettingsManager
+
+    tasks = task_repo.find_all()
+    lines = []
+    for t in tasks:
+        lines.append(
+            f"- [{t.priority}] {t.title} "
+            f"(进度 {getattr(t, 'progress', 0)}%, 截止 {t.deadline or '无'})"
+        )
+    pending = "\n".join(lines) if lines else "当前没有活跃任务。"
+
+    prompt = (
+        f"今天是 {today_str}。以下是我当前的活跃待办：\n{pending}\n\n"
+        f"请为我制定一份「今日计划」。"
+    )
+    ai_reply = AIReviewService.generate_summary(prompt, kind="plan")
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    style_name = SettingsManager().ai.plan.active_style().name
+    report = f"# 📅 ZenTray 每日计划 ({today_str})\n\n"
+    report += f"> ⏱️ 生成时间：{now}\n\n"
+    if ai_reply:
+        report += f"## 🧭 AI 计划（{style_name}）\n{ai_reply}\n\n"
+    else:
+        report += "## 🧭 AI 计划\n（生成失败或未配置 API Key）\n\n"
+    report += "## 📋 当前任务快照\n" + pending + "\n"
+
+    save_local = SettingsManager().ai.plan.save_local
+    filename, seq = _next_report_filename("plan", today_str)
+    ok = _notify_and_save(
+        f"每日计划 {today_str}",
+        report,
+        save_local=save_local,
+        filename=filename,
+    )
+    try:
+        from zentray.services.activity_log import log_event
+
+        log_event(
+            "ai",
+            "plan",
+            f"{today_str}-计划-#{seq}",
+            "已生成" if ai_reply else "生成失败或未配置",
+            meta={"file": filename, "date": today_str, "seq": seq, "kind": "plan"},
+        )
+    except Exception:
+        pass
+    return ok
+
+
+def execute_nightly_review(today_str: str, task_repo: TaskRepository) -> bool:
+    """生成每日复盘（兼容旧入口名）。"""
+    from zentray.services.settings_manager import SettingsManager
+
     now_time_precise = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. 提取当日日志供大模型批判
     log_file = ARCHIVE_DIR / f"{today_str}.log"
     log_content = ""
     if log_file.exists():
         with open(log_file, "r", encoding="utf-8") as f:
             log_content = f.read()
 
-    # 2. 提取明日高危告警任务
     tasks = task_repo.find_all()
     high_tasks = [t for t in tasks if t.priority == "high"]
     pending_str = "\n".join(
         [f"- [{t.category}] {t.title} (Deadline: {t.deadline})" for t in high_tasks]
     )
 
-    # 3. 构建给大模型的数据投喂模板
     prompt = (
         f"以下是我今天（{today_str}）的待办执行归档记录：\n"
         f"{log_content if log_content else '今天一条都没做，烂透了。'}\n\n"
@@ -81,23 +251,38 @@ def execute_nightly_review(today_str: str, task_repo: TaskRepository):
         f"请为我生成一份每日总结与明日规划。"
     )
 
-    # 4. 请求大模型
-    ai_reply = AIReviewService.generate_summary(prompt)
+    ai_reply = AIReviewService.generate_summary(prompt, kind="review")
 
-    # 5. 拼装推向 WxPusher 的最终 Markdown
     report = f"# 📅 ZenTray 禅定复盘 ({today_str})\n\n"
     report += f"> ⏱️ 生成时间：{now_time_precise} (防折叠标识)\n\n"
 
+    style_name = SettingsManager().ai.review.active_style().name
     if ai_reply:
-        report += f"## 🤖 AI 教练锐评\n{ai_reply}\n\n"
+        report += f"## 🤖 AI 教练锐评（{style_name}）\n{ai_reply}\n\n"
     else:
-        report += "## 🤖 AI 教练状态异常\nAI教练今日离线，无法生成评语。\n\n"
+        report += "## 🤖 AI 教练锐评\n（生成失败或未配置 API Key）\n\n"
 
-    # 安全降级，确保 WxPusher 至少能把核心数量推出去
-    done_count = len([x for x in log_content.split('\n') if '[状态: DONE]' in x])
-    report += f"---\n**今日斩杀数量**: {done_count}\n"
-    report += f"**明日高危报警**: {len(high_tasks)}\n"
+    report += "## 📌 高优先任务\n"
+    report += (pending_str or "暂无") + "\n"
 
-    # 发射到手机
-    client = NotificationClient()
-    client.send(title=f"ZenTray 毒舌复盘 ({now_time_precise})", content=report)
+    save_local = SettingsManager().ai.review.save_local
+    filename, seq = _next_report_filename("review", today_str)
+    ok = _notify_and_save(
+        f"每日复盘 {today_str}",
+        report,
+        save_local=save_local,
+        filename=filename,
+    )
+    try:
+        from zentray.services.activity_log import log_event
+
+        log_event(
+            "ai",
+            "review",
+            f"{today_str}-复盘-#{seq}",
+            "已生成" if ai_reply else "生成失败或未配置",
+            meta={"file": filename, "date": today_str, "seq": seq, "kind": "review"},
+        )
+    except Exception:
+        pass
+    return ok

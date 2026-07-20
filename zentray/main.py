@@ -1,11 +1,13 @@
 import sys
 import os
 
-# 将项目根目录（zentray 的上一级目录）加入系统路径，解决绝对导包的问题
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# 将项目根目录加入路径，兼容直接 `python zentray/main.py` 启动
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 # 修复 Linux 下无法唤出 Fcitx5 输入法的底层 BUG
-if sys.platform.startswith('linux'):
+if sys.platform.startswith("linux"):
     os.environ["QT_IM_MODULE"] = "ibus"
     os.environ.setdefault("XMODIFIERS", "@im=fcitx")
 
@@ -13,80 +15,309 @@ from PySide6.QtWidgets import QApplication
 from zentray.dependencies import injector, init_tray_controller
 from zentray.core.repository import TaskRepository, PeriodicTemplateRepository
 from zentray.services.system_utils import SingleInstanceGuard, HotkeyListener
+from zentray.services.task_service import TaskService
 from zentray.ui.overlay import QuickAddOverlay
+from zentray.ui.reminder_dialog import ReminderDialog, apply_reminder_action
 from zentray.workers.watcher import WatcherWorker
 from zentray.workers.nightly_job import NightlyJobWorker
-from zentray.config import (
-    HOTKEY_QUICK_ADD, validate_config, is_notification_enabled, get_enabled_features
-)
-from zentray.ui.setup_wizard import should_show_wizard, show_setup_wizard
-import logging_config
+from zentray.workers.reminder_job import ReminderWorker
+from zentray.config import HOTKEY_QUICK_ADD, VERSION, validate_config, get_enabled_features
+from zentray.logging_config import setup_logging
+from zentray.resources import ensure_app_icons, get_resource_path
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def main():
-    # 1. 配置验证（返回警告列表，不退出）
-    warnings = validate_config()
-    logging_config.setup_logging()
+class AppRuntime:
+    """运行时持有可热启停的 worker。"""
 
-    # 2. 显示配置状态
+    def __init__(self):
+        self.controller = None
+        self.nightly = None
+        self.reminder_worker = None
+        self.watcher = None
+        self.overlay = None
+        self.hotkey = None
+
+
+def _start_nightly_if_needed(runtime: AppRuntime, task_repo: TaskRepository) -> None:
+    """计划/复盘任一开启且已配置 API，或通知渠道可用时启动调度 worker。"""
+    need = False
+    try:
+        from zentray.services.settings_manager import SettingsManager
+
+        sm = SettingsManager()
+        ai = sm.ai
+        need = bool(
+            (ai.plan.enabled or ai.review.enabled) and sm.is_ai_configured()
+        ) or sm.is_notification_configured()
+    except Exception:
+        features = get_enabled_features()
+        need = features["notification"] or features["ai_coach"]
+
+    if need:
+        if runtime.nightly is None or not runtime.nightly.isRunning():
+            runtime.nightly = NightlyJobWorker(task_repo)
+            if runtime.controller:
+                runtime.nightly.job_completed.connect(
+                    runtime.controller.renderer.show_notification
+                )
+            runtime.nightly.start()
+            logger.info("AI 计划/复盘 worker 已启动")
+    else:
+        if runtime.nightly and runtime.nightly.isRunning():
+            runtime.nightly.stop()
+            runtime.nightly = None
+            logger.info("AI 计划/复盘 worker 已停止")
+
+
+def _on_reminder_due(runtime: AppRuntime, task, fire_key: str) -> None:
+    try:
+        from zentray.ui.vue_commands import try_vue_reminder
+        from zentray.ui.vue_commands import try_vue_progress
+        from zentray.ui.web_host import use_vue_ui
+
+        action = "dismiss"
+        snooze_minutes = 10
+        handled, payload = try_vue_reminder(task, fire_key)
+        if handled and isinstance(payload, dict):
+            action = payload.get("action") or "dismiss"
+            try:
+                snooze_minutes = int(payload.get("snooze_minutes") or 10)
+            except (TypeError, ValueError):
+                snooze_minutes = 10
+        else:
+            dlg = ReminderDialog(task)
+            dlg.exec()
+            action = dlg.result_action
+            snooze_minutes = getattr(dlg, "snooze_minutes", 10) or 10
+
+        rem = apply_reminder_action(
+            task,
+            action,
+            fire_key,
+            snooze_minutes=snooze_minutes,
+        )
+        task_service = injector.get(TaskService)
+        task_service.update_task_reminder(task.id, rem)
+
+        if action == "snooze":
+            try:
+                from zentray.services.activity_log import log_event
+
+                log_event(
+                    "task",
+                    "delay",
+                    getattr(task, "title", "") or "",
+                    f"提醒延时 {snooze_minutes} 分钟",
+                    meta={"id": getattr(task, "id", None), "snooze_minutes": snooze_minutes},
+                )
+            except Exception:
+                pass
+
+        if action == "done":
+            task_service.mark_done(task.id)
+            if runtime.controller:
+                runtime.controller.update_display()
+        elif action == "update":
+            fresh = task_service.find_task(task.id) or task
+            if use_vue_ui() and runtime.controller:
+                try_vue_progress(runtime.controller, fresh)
+            else:
+                from zentray.ui.dialogs import ProgressDialog
+
+                progress = ProgressDialog(task=fresh)
+                if progress.exec():
+                    percent, note = progress.get_data()
+                    task_service.update_progress(task.id, percent, note)
+            if runtime.controller:
+                runtime.controller.update_display()
+        elif runtime.controller:
+            runtime.controller.update_display()
+    finally:
+        if runtime.reminder_worker:
+            runtime.reminder_worker.clear_pending(task.id)
+
+
+def main():
+    setup_logging()
+    warnings = validate_config()
+
     features = get_enabled_features()
-    logger.info("ZenTray v3.7.0 启动中...")
+    logger.info("ZenTray v%s 启动中...", VERSION)
     logger.info("核心功能: ✓ 已启用")
-    logger.info("通知服务: %s", "✓ 已启用" if features["notification"] else "✗ 未配置（设置 WXPUSHER 凭据以启用）")
-    logger.info("AI 教练: %s", "✓ 已启用" if features["ai_coach"] else "✗ 未配置（设置 AI_API_KEY 以启用）")
+    logger.info(
+        "通知服务: %s",
+        "✓ 已启用" if features["notification"] else "✗ 未配置（设置 WXPUSHER 凭据以启用）",
+    )
+    logger.info(
+        "AI 教练: %s",
+        "✓ 已启用" if features["ai_coach"] else "✗ 未配置（设置 AI_API_KEY 以启用）",
+    )
 
     for warning in warnings:
         logger.warning(warning)
 
-    # 3. 防多开锁
-    SingleInstanceGuard()
+    ensure_app_icons()
 
-    # 4. 初始化 QApplication
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    app.setApplicationName("ZenTray")
+    app.setApplicationDisplayName("ZenTray")
+    app.setDesktopFileName("zentray")
 
-    # 5. 首次运行显示配置向导
-    if should_show_wizard():
-        show_setup_wizard()
+    # 应用主图标（任务栏 / 对话框）
+    try:
+        from PySide6.QtGui import QIcon
 
-    # 6. 通过 DI 容器初始化托盘控制器
-    controller = init_tray_controller(app)
+        icon_path = ensure_app_icons() / "app_icon.png"
+        if not icon_path.exists():
+            icon_path = get_resource_path("resources/icons/app_icon.png")
+        if icon_path.exists():
+            app.setWindowIcon(QIcon(str(icon_path)))
+    except Exception as e:
+        logger.warning("应用图标加载失败: %s", e)
 
-    # 6. 初始化闪电添加浮层与全局快捷键
-    overlay = QuickAddOverlay()
-    overlay.task_added.connect(controller.reload_data)
+    # 应用主题（白天 / 黑夜 / 跟随系统）
+    try:
+        from zentray.ui.theme import apply_app_theme
 
-    hotkey = HotkeyListener(HOTKEY_QUICK_ADD)
-    hotkey.triggered.connect(overlay.show_center)
-    hotkey.start()
+        apply_app_theme()
+    except Exception as e:
+        logger.warning("主题加载失败: %s", e)
 
-    # 7. 启动后台巡检 worker（注入 Repository）
+    # 仅首次无配置时显示向导；之后一律静默托盘启动（优先 Vue）
+    try:
+        from zentray.ui.setup_wizard import should_show_wizard, show_setup_wizard
+        from zentray.ui.vue_commands import try_vue_setup_wizard
+        from zentray.api.handlers import ApiContext, set_api_context
+        from zentray.services.task_service import TaskService as _TS
+
+        if should_show_wizard():
+            # 向导可能早于 controller：先挂最小 API 上下文
+            try:
+                set_api_context(ApiContext(task_service=injector.get(_TS)))
+                from zentray.api.server import get_api_server, vue_ui_available
+
+                if vue_ui_available():
+                    get_api_server().start()
+            except Exception:
+                pass
+            if not try_vue_setup_wizard():
+                show_setup_wizard()
+            from zentray.services.settings_manager import SettingsManager
+
+            SettingsManager.reload()
+            apply_app_theme()
+            features = get_enabled_features()
+    except Exception as e:
+        logger.warning("配置向导跳过: %s", e)
+
+    _guard = SingleInstanceGuard()
+    _guard.quit_requested.connect(app.quit)
+
+    runtime = AppRuntime()
+    # 初始化托盘控制器：顶栏图标 + 任务标题轮播（无主窗口）
+    runtime.controller = init_tray_controller(app)
+
+    # Vue 前端 API：复用 TaskService，不改变业务逻辑
+    try:
+        from zentray.api.handlers import ApiContext, set_api_context
+        from zentray.api.server import get_api_server, vue_ui_available
+
+        task_service_early = injector.get(TaskService)
+
+        def _on_api_changed():
+            if runtime.controller:
+                runtime.controller.reload_data()
+
+        def _on_api_apply_settings():
+            if runtime.controller:
+                runtime.controller.apply_settings()
+
+        set_api_context(
+            ApiContext(
+                task_service=task_service_early,
+                on_changed=_on_api_changed,
+                apply_settings=_on_api_apply_settings,
+            )
+        )
+        if vue_ui_available():
+            url = get_api_server().start()
+            logger.info("Vue UI API 已启动: %s", url)
+        else:
+            logger.info("Vue dist 未构建，对话框将使用原生 Qt（可执行 web/ 下 npm run build）")
+    except Exception:
+        logger.exception("Vue API 初始化失败，将使用原生对话框")
+
+    def _on_activate_existing():
+        """再次点击桌面图标：不弹窗，仅刷新顶栏轮播。"""
+        try:
+            if runtime.controller:
+                # 确保轮播定时器在跑，并立刻刷新顶栏标题
+                runtime.controller.start_rotation()
+                runtime.controller.update_display(update_menu=True)
+                logger.info("二次点击：已刷新顶栏显示（无弹窗）")
+        except Exception:
+            logger.exception("激活已有实例时出错")
+
+    _guard.activate_requested.connect(_on_activate_existing)
+
+    # 设置保存后刷新 nightly
+    original_apply = runtime.controller.apply_settings
+
+    def apply_settings_with_workers():
+        original_apply()
+        task_repo = injector.get(TaskRepository)
+        _start_nightly_if_needed(runtime, task_repo)
+
+    runtime.controller.apply_settings = apply_settings_with_workers
+
+    # 静默启动：仅托盘（启动占位 → 随后轮播）
+    logger.info("静默启动完成：仅顶栏托盘 + 任务标题轮播")
+
+    task_service = injector.get(TaskService)
+    # 闪电添加：优先 Vue 浮层，否则 Qt Overlay
+    runtime.overlay = QuickAddOverlay(task_service=task_service)
+    runtime.overlay.task_added.connect(runtime.controller.reload_data)
+
+    def _on_quick_add():
+        from zentray.ui.vue_commands import try_vue_quick_add
+
+        if try_vue_quick_add(runtime.controller):
+            return
+        runtime.overlay.show_center()
+
+    runtime.hotkey = HotkeyListener(HOTKEY_QUICK_ADD)
+    runtime.hotkey.triggered.connect(_on_quick_add)
+    if not runtime.hotkey.start():
+        logger.warning("全局热键不可用（权限/Wayland？），仍可通过托盘菜单新建任务")
+
     task_repo = injector.get(TaskRepository)
     template_repo = injector.get(PeriodicTemplateRepository)
-    watcher = WatcherWorker(task_repo, template_repo)
-    watcher.tasks_updated.connect(controller.reload_data)
-    watcher.start()
-
-    # 8. 启动夜间复盘 worker（仅在通知可用时）
-    if features["notification"]:
-        nightly = NightlyJobWorker(task_repo)
-        nightly.job_completed.connect(controller.renderer.show_notification)
-        nightly.start()
-        logger.info("夜间复盘 worker 已启动")
-    else:
-        logger.info("夜间复盘 worker 已跳过（通知服务未配置）")
-
-    # 9. 托盘提示：若未配置通知，显示引导提示
-    if warnings:
-        controller.renderer.show_notification(
-            "ZenTray",
-            "部分高级功能未配置。右键托盘 → 查看 README 了解如何启用。"
+    runtime.watcher = WatcherWorker(task_repo, template_repo)
+    runtime.watcher.tasks_updated.connect(runtime.controller.reload_data)
+    runtime.watcher.task_overdue.connect(
+        lambda task: runtime.controller.renderer.show_notification(
+            "⏰ 任务逾期",
+            f"「{task.title}」已逾期，优先级已自动提升为 {task.priority.upper()}",
         )
+    )
+    runtime.watcher.start()
 
-    # 10. 进入事件循环
+    _start_nightly_if_needed(runtime, task_repo)
+
+    runtime.reminder_worker = ReminderWorker(task_repo)
+    runtime.reminder_worker.reminder_due.connect(
+        lambda task, key: _on_reminder_due(runtime, task, key)
+    )
+    runtime.reminder_worker.start()
+
+    if warnings:
+        for w in warnings:
+            logger.warning("配置提示: %s", w)
+
     sys.exit(app.exec())
 
 

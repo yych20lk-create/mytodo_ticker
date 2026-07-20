@@ -1,25 +1,95 @@
-import requests
+"""统一通知客户端：多渠道（应用弹窗 + WxPusher）。"""
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, List, Optional
+
+from zentray.services.wxpusher import WxPusherService
+
+logger = logging.getLogger(__name__)
+
 
 class NotificationClient:
-    """提供给 ZenTray 或其他本地工具向移动端推送消息的轻量客户端"""
-    def __init__(self, host: str = "127.0.0.1", port: int = 18330):
-        self.url = f"http://{host}:{port}/send"
+    """多渠道通知出口。"""
+
+    def __init__(
+        self,
+        app_token: Optional[str] = None,
+        uid: Optional[str] = None,
+    ):
+        # 兼容旧构造：单 WxPusher
+        self._legacy_token = app_token
+        self._legacy_uid = uid
+
+    @classmethod
+    def from_settings(cls) -> "NotificationClient":
+        return cls()
+
+    def is_configured(self) -> bool:
+        from zentray.services.settings_manager import SettingsManager
+
+        return SettingsManager().is_notification_configured()
 
     def send(self, title: str, content: str) -> dict:
-        """
-        向本地公共发送服务投递一条消息。
-        :param title: 消息标题 / 摘要
-        :param content: 消息内容 (Markdown 或纯文本)
-        :return: 接口返回的响应字典
-        """
-        payload = {
-            "title": title,
-            "content": content
-        }
-        try:
-            resp = requests.post(self.url, json=payload, timeout=12)
-            return resp.json()
-        except requests.exceptions.ConnectionError:
-            return {"status": "error", "message": "无法连接到本地通知服务，请确保它已启动。"}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        """向所有已启用且已配置的渠道发送。"""
+        from zentray.services.settings_manager import SettingsManager
+
+        sm = SettingsManager()
+        n = sm.notification
+        results: Dict[str, Any] = {"channels": {}}
+        any_ok = False
+
+        # 应用弹窗：由调用方（托盘）监听；此处只标记
+        if n.app_popup_enabled():
+            results["channels"]["app_popup"] = {
+                "status": "ok",
+                "message": "app_popup",
+            }
+            any_ok = True
+
+        # WxPusher 多条
+        wx_list = n.wxpusher_channels()
+        if not wx_list and self._legacy_token and self._legacy_uid:
+            wx_list = []  # 走 legacy 下方
+        for ch in wx_list:
+            wx = WxPusherService(
+                app_token=ch.wxpusher_app_token, uid=ch.wxpusher_uid
+            )
+            if not wx.is_configured():
+                results["channels"][ch.id or ch.name] = {
+                    "status": "error",
+                    "message": "未配置 Token/UID",
+                }
+                continue
+            r = wx.send_message(content=content, summary=title)
+            results["channels"][ch.id or ch.name] = r
+            code = r.get("code")
+            if code == 1000 or code == 0:
+                any_ok = True
+
+        # 兼容旧单字段
+        if self._legacy_token or (
+            n.wxpusher_app_token and n.wxpusher_uid and not wx_list
+        ):
+            wx = WxPusherService(
+                app_token=self._legacy_token or n.wxpusher_app_token,
+                uid=self._legacy_uid or n.wxpusher_uid,
+            )
+            if wx.is_configured():
+                r = wx.send_message(content=content, summary=title)
+                results["channels"]["legacy_wxpusher"] = r
+                code = r.get("code")
+                if code == 1000 or code == 0:
+                    any_ok = True
+
+        if any_ok:
+            results["status"] = "ok"
+            # 标记是否需要本地弹窗
+            results["app_popup"] = n.app_popup_enabled()
+            return results
+
+        logger.warning("No notification channel succeeded: %s", results)
+        results["status"] = "error"
+        results["message"] = "没有可用的通知渠道（请检查设置）"
+        results["app_popup"] = n.app_popup_enabled()
+        return results

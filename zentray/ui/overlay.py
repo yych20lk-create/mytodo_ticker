@@ -1,18 +1,11 @@
 # zentray/ui/overlay.py
 """
 闪电添加无边框界面。
-
-使用半透明背景模拟毛玻璃特效，极简居中，失去焦点后自动隐藏。
-通过 DI 容器获取 TaskRepository，与存储层解耦。
 """
-import uuid
-import datetime
-
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLineEdit
 from PySide6.QtCore import Qt, Signal
-from zentray.core.models import Task
 from zentray.dependencies import injector
-from zentray.core.repository import TaskRepository
+from zentray.services.task_service import TaskService
 
 
 class QuickAddOverlay(QWidget):
@@ -20,7 +13,7 @@ class QuickAddOverlay(QWidget):
 
     task_added = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, task_service: TaskService | None = None):
         super().__init__(parent)
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -28,9 +21,7 @@ class QuickAddOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.resize(600, 80)
         self.init_ui()
-
-        # 通过 DI 获取存储
-        self.task_repo = injector.get(TaskRepository)
+        self.task_service = task_service or injector.get(TaskService)
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -69,19 +60,17 @@ class QuickAddOverlay(QWidget):
         self.entry.setFocus()
 
     def save_and_close(self):
-        """保存任务到存储并通知主 UI 刷新"""
+        """通过 TaskService 保存任务并通知主 UI 刷新"""
         title = self.entry.text().strip()
         if title:
-            task = Task(
-                id=str(uuid.uuid4()),
-                title=title,
-                category="工作",
-                priority="medium",
-                created_at=datetime.datetime.now().isoformat(),
-            )
-            tasks = self.task_repo.find_all()
-            tasks.append(task)
-            self.task_repo.save_all(tasks)
+            from zentray.services.settings_manager import SettingsManager
+
+            qa = SettingsManager().quick_add
+            self.task_service.create_task({
+                "title": title,
+                "category": qa.default_category or "工作",
+                "priority": qa.default_priority or "medium",
+            })
             self.task_added.emit()
 
         self.hide()

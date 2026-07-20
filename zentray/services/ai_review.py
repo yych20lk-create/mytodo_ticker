@@ -1,39 +1,67 @@
+"""调用大模型 API 生成每日复盘 / 每日计划。"""
+from __future__ import annotations
+
+import logging
+from typing import Literal, Optional
+
 import requests
-from typing import Optional
-from zentray.config import AI_API_BASE_URL, AI_API_KEY, AI_MODEL_NAME
+
+logger = logging.getLogger(__name__)
+
+JobKind = Literal["review", "plan"]
+
 
 class AIReviewService:
-    """调用大模型 API 生成每日毒舌锐评总结"""
-    
+    """调用大模型 API。凭据取 active API profile；风格取 plan/review 各自配置。"""
+
     @classmethod
-    def generate_summary(cls, prompt: str) -> Optional[str]:
-        if not AI_API_KEY:
+    def generate_summary(
+        cls,
+        prompt: str,
+        *,
+        kind: JobKind = "review",
+    ) -> Optional[str]:
+        from zentray.services.settings_manager import SettingsManager
+
+        sm = SettingsManager()
+        ai = sm.ai
+        profile = ai.active_profile()
+        if not profile or not profile.api_key:
             return None
-            
+
+        job = ai.plan if kind == "plan" else ai.review
+        if not job.enabled:
+            # 手动触发时仍允许调用（由上层决定）；此处仅无 key 时拒绝
+            pass
+
+        style = job.active_style()
+        system_prompt = style.system_prompt
+        if not system_prompt:
+            system_prompt = (
+                "你是一个效率教练。请根据用户待办情况输出 Markdown。"
+            )
+
         headers = {
-            "Authorization": f"Bearer {AI_API_KEY}",
-            "Content-Type": "application/json"
+            "Authorization": f"Bearer {profile.api_key}",
+            "Content-Type": "application/json",
         }
-        
-        system_prompt = (
-            "你是一个尖酸刻薄但内心温暖的高级效率教练。你会根据用户的待办完成情况和明日计划进行总结，"
-            "毫不留情地指出用户的摸鱼行为，但结尾必须给予极其提振士气的鼓励。输出标准 Markdown 格式。"
-        )
-        
+
         payload = {
-            "model": AI_MODEL_NAME,
+            "model": profile.model or "gpt-4o",
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
-            "temperature": 0.7
+            "temperature": 0.7,
         }
-        
+
         try:
-            resp = requests.post(f"{AI_API_BASE_URL}/chat/completions", json=payload, headers=headers, timeout=30)
+            base = (profile.base_url or "https://api.openai.com/v1").rstrip("/")
+            url = f"{base}/chat/completions"
+            resp = requests.post(url, json=payload, headers=headers, timeout=45)
             resp.raise_for_status()
             data = resp.json()
             return data["choices"][0]["message"]["content"]
         except Exception as e:
-            print(f"AI Review API Error: {e}")
+            logger.warning("AI API Error (%s): %s", kind, e)
             return None
