@@ -121,6 +121,8 @@ a = Analysis(
         ('zentray/ui/linux_tray_bridge.py', 'zentray/ui'),
         # Vue + Arco 构建产物（需先 npm run build）
         ('web/dist', 'web/dist'),
+        # 内置脚本/服务插件（plugin.yaml + 可执行入口）
+        ('bundled_plugins', 'bundled_plugins'),
     ],
     hiddenimports=[
         # 核心模块
@@ -134,6 +136,11 @@ a = Analysis(
         'zentray.services.script_service',
         'zentray.services.notification',
         'zentray.services.ai_review',
+        'zentray.plugins',
+        'zentray.plugins.loader',
+        'zentray.plugins.runtime',
+        'zentray.plugins.manifest',
+        'yaml',
         'zentray.ui.controller',
         'zentray.ui.renderer',
         'zentray.ui.menu_builder',

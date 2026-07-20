@@ -179,6 +179,14 @@ build_linux_deb() {
         fi
     fi
 
+    # 内置插件（与 onefile 内嵌双保险：解压目录外也可从 /opt/zentray 旁读取时由 _MEIPASS 提供）
+    if [[ -d "${PROJECT_DIR}/bundled_plugins" ]]; then
+        mkdir -p "${stage}/opt/${PKG_NAME}/bundled_plugins"
+        cp -a "${PROJECT_DIR}/bundled_plugins/." "${stage}/opt/${PKG_NAME}/bundled_plugins/" || true
+        # 确保 shell 入口可执行
+        find "${stage}/opt/${PKG_NAME}/bundled_plugins" -type f -name '*.sh' -exec chmod 755 {} \;
+    fi
+
     # 启动包装：保证 PATH 与工作目录
     cat > "${stage}/usr/bin/${PKG_NAME}" <<'WRAP'
 #!/bin/sh

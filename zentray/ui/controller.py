@@ -14,9 +14,9 @@ import logging
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication
 
-from zentray.config import _PROJECT_ROOT
 from zentray.plugins.loader import PluginLoader
 from zentray.plugins.runtime import PluginRuntime
+from zentray.resources import get_resource_path
 from zentray.services.task_service import TaskService
 from zentray.services.pomodoro_service import PomodoroService
 from zentray.services.script_service import ScriptService
@@ -139,10 +139,11 @@ class TrayController(QObject):
         if not ops.enabled:
             self._ops_plugins = []
             return
-        bundled = _PROJECT_ROOT / "bundled_plugins"
+        # 开发态：仓库根 bundled_plugins；打包态：PyInstaller 解压目录
+        bundled = get_resource_path("bundled_plugins")
         user = self._settings.get_ops_user_plugins_dir()
         self._ops_plugins = self.plugin_loader.scan(
-            bundled_dir=bundled,
+            bundled_dir=bundled if bundled.is_dir() else None,
             user_dir=user,
             load_bundled=ops.load_bundled,
             load_user=ops.load_user,
