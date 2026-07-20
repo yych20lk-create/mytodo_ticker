@@ -179,7 +179,24 @@ python scripts/validate_plugin.py path/to/plugin
 
 ---
 
-## 8. 开发检查清单
+## 8. 任务关联插件
+
+任务字段 `plugin_id`（可选）保存插件 `id`。
+
+| 场景 | 行为 |
+|------|------|
+| 新建 / 编辑任务 | 下拉选择已加载插件；可清空 |
+| 更新进度页 | 若已关联，显示「▶ 运行关联插件」 |
+| 周期模板 | 模板可带 `plugin_id`，派发实例时继承 |
+
+API：
+
+- `GET /api/plugins` → `{ enabled, items: [{id,name,type,...}], busy }`  
+- `POST /api/plugins/{id}/run` → script 启动；service 可 body `{ "action": "start"|"stop"|"status" }`  
+
+---
+
+## 9. 开发检查清单
 
 - [ ] `plugin.yaml` 字段完整且 `api_version: 1`  
 - [ ] `entry` 相对路径、`chmod +x`  
@@ -190,9 +207,9 @@ python scripts/validate_plugin.py path/to/plugin
 
 ---
 
-## 9. 样例
+## 10. 样例
 
-### 9.1 内置示例（随应用分发）
+### 10.1 内置示例（随应用分发）
 
 | 路径 | id | 说明 |
 |------|-----|------|
@@ -201,7 +218,7 @@ python scripts/validate_plugin.py path/to/plugin
 启用「脚本与服务」并打开 **加载内置插件** 后，菜单中可见「网络清理（示例）」。  
 说明见该目录 `README.md`。
 
-### 9.2 测试夹具（仅供开发/CI）
+### 10.2 测试夹具（仅供开发/CI）
 
 - `tests/fixtures/plugins/sample-script`  
 - `tests/fixtures/plugins/sample-service`  

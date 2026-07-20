@@ -33,10 +33,16 @@ class ApiContext:
         task_service=None,
         on_changed: Optional[Callable[[], None]] = None,
         apply_settings: Optional[Callable[[], None]] = None,
+        plugin_runtime=None,
+        plugin_loader=None,
+        pomodoro_service=None,
     ):
         self.task_service = task_service
         self.on_changed = on_changed or (lambda: None)
         self.apply_settings = apply_settings or (lambda: None)
+        self.plugin_runtime = plugin_runtime
+        self.plugin_loader = plugin_loader
+        self.pomodoro_service = pomodoro_service
 
 
 _ctx = ApiContext()
@@ -173,6 +179,13 @@ def handle_request(
             _ctx.on_changed()
             return 200, {"settings": _settings_dict()}
 
+        if method == "GET" and path == "/api/plugins":
+            return 200, _plugins_list()
+
+        if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/run"):
+            pid = path[len("/api/plugins/") : -len("/run")]
+            return _run_plugin(pid, body)
+
         if method == "GET" and path == "/api/current-task":
             t = _ctx.task_service.get_current_task()
             return 200, {"item": _task_dict(t) if t else None}
@@ -244,6 +257,79 @@ def _settings_dict() -> dict:
         "appearance": asdict(s.appearance),
         "ops": asdict(s.ops),
     }
+
+
+def _plugins_list() -> dict:
+    """已加载且校验通过的插件（依赖设置启用 + loader 扫描）。"""
+    from zentray.resources import get_resource_path
+    from zentray.services.settings_manager import SettingsManager
+
+    sm = SettingsManager()
+    if not sm.ops.enabled:
+        return {"enabled": False, "items": []}
+    loader = _ctx.plugin_loader
+    runtime = _ctx.plugin_runtime
+    if loader is None:
+        return {"enabled": True, "items": [], "busy": False}
+    # 每次列表时重扫，便于用户刚拷贝插件
+    bundled = get_resource_path("bundled_plugins")
+    loader.scan(
+        bundled_dir=bundled if bundled.is_dir() else None,
+        user_dir=sm.get_ops_user_plugins_dir(),
+        load_bundled=sm.ops.load_bundled,
+        load_user=sm.ops.load_user,
+    )
+    items = []
+    for p in loader.plugins:
+        m = p.manifest
+        items.append(
+            {
+                "id": m.id,
+                "name": m.name,
+                "type": m.type.value,
+                "version": m.version,
+                "description": m.description or "",
+                "source": p.source,
+            }
+        )
+    busy = bool(runtime and runtime.is_busy)
+    return {"enabled": True, "items": items, "busy": busy}
+
+
+def _run_plugin(plugin_id: str, body: dict) -> tuple[int, dict]:
+    """运行 script 插件（异步）；service 可传 action=start|stop|status。"""
+    from zentray.plugins.models import PluginType
+    from zentray.services.settings_manager import SettingsManager
+
+    if not SettingsManager().ops.enabled:
+        return 400, {"error": "脚本与服务未启用"}
+    loader = _ctx.plugin_loader
+    runtime = _ctx.plugin_runtime
+    if not loader or not runtime:
+        return 503, {"error": "插件运行时未就绪"}
+    plug = loader.get(plugin_id)
+    if not plug:
+        return 404, {"error": f"插件不存在或未加载: {plugin_id}"}
+
+    pomo = _ctx.pomodoro_service
+    pomo_active = bool(pomo and getattr(pomo, "is_active", False))
+
+    action = (body.get("action") or "run").strip().lower()
+    if plug.manifest.type == PluginType.SERVICE:
+        if action not in ("start", "stop", "status"):
+            action = "status"
+        ok = runtime.service_cmd(plug, action, pomodoro_active=pomo_active)
+        return 200, {"ok": ok, "id": plugin_id, "action": action}
+
+    # script
+    if runtime.is_busy:
+        return 409, {"error": "已有脚本在运行"}
+    if pomo_active:
+        return 409, {"error": "番茄钟进行中，无法运行脚本"}
+    started = runtime.run_script(plug, pomodoro_active=False)
+    if not started:
+        return 409, {"error": "无法启动脚本"}
+    return 200, {"ok": True, "id": plugin_id, "started": True}
 
 
 def _save_settings(data: dict) -> None:

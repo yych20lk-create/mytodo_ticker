@@ -30,7 +30,17 @@
         <div class="action-row">
           <a-button type="primary" status="success" size="small" @click="onDone">完成</a-button>
           <a-button status="danger" size="small" @click="onAbandon">废弃</a-button>
+          <a-button
+            v-if="task?.plugin_id"
+            type="outline"
+            size="small"
+            :loading="runningPlugin"
+            @click="onRunPlugin"
+          >
+            ▶ 运行关联插件
+          </a-button>
         </div>
+        <p v-if="pluginLabel" class="plugin-line">关联插件：{{ pluginLabel }}</p>
 
         <div v-if="logs.length" class="recent">
           <div class="recent-head">最近进展</div>
@@ -58,7 +68,9 @@ import {
   cancelHost,
   closeHost,
   getTask,
+  listPlugins,
   markDone,
+  runPlugin,
   updateProgress,
 } from '@/api/client'
 
@@ -71,6 +83,15 @@ const saving = ref(false)
 const task = ref(null)
 const percent = ref(0)
 const note = ref('')
+const runningPlugin = ref(false)
+const pluginItems = ref([])
+
+const pluginLabel = computed(() => {
+  const id = task.value?.plugin_id
+  if (!id) return ''
+  const p = (pluginItems.value || []).find((x) => x.id === id)
+  return p ? `${p.name} (${id})` : id
+})
 
 const logs = computed(() => task.value?.progress_logs || [])
 const recentLogs = computed(() => [...logs.value].slice(-4).reverse())
@@ -115,11 +136,43 @@ function onAbandon() {
   })
 }
 
+function onRunPlugin() {
+  const id = task.value?.plugin_id
+  if (!id) return
+  const p = (pluginItems.value || []).find((x) => x.id === id)
+  const name = p?.name || id
+  Modal.confirm({
+    title: '运行关联插件',
+    content: `确定运行「${name}」？进度显示在托盘顶栏。`,
+    okText: '运行',
+    async onOk() {
+      runningPlugin.value = true
+      try {
+        const body = p?.type === 'service' ? { action: 'start' } : {}
+        await runPlugin(id, body)
+        Message.success(
+          p?.type === 'service' ? '已发送服务命令' : '插件已开始运行，请看托盘',
+        )
+      } catch (e) {
+        Message.error(e?.response?.data?.error || e?.message || '运行失败')
+      } finally {
+        runningPlugin.value = false
+      }
+    },
+  })
+}
+
 onMounted(async () => {
   loading.value = true
   try {
     task.value = await getTask(taskId.value)
     percent.value = snap10(task.value?.progress || 0)
+    try {
+      const data = await listPlugins()
+      pluginItems.value = data.items || []
+    } catch (_) {
+      pluginItems.value = []
+    }
   } catch (e) {
     Message.error(e?.message || '加载失败')
   } finally {
@@ -147,6 +200,11 @@ onMounted(async () => {
   display: none;
   width: 0;
   height: 0;
+}
+.plugin-line {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-text-3);
 }
 .task-title {
   font-size: 16px;

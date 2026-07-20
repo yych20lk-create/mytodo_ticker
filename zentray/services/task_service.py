@@ -395,6 +395,7 @@ class TaskService:
             auto_abandon_on_overdue=bool(
                 getattr(tmpl, "auto_abandon_on_overdue", False)
             ),
+            plugin_id=getattr(tmpl, "plugin_id", None) or None,
         )
         tasks = self.task_repo.find_all()
         tasks.append(new_task)
@@ -434,6 +435,7 @@ class TaskService:
             schedule_end_date=(data.get("schedule_end_date") or None) or None,
             template_id=data.get("template_id") or str(uuid.uuid4()),
             last_generated_period=data.get("last_generated_period"),
+            plugin_id=(data.get("plugin_id") or None) or None,
         )
 
     def _normalize_category_fields(self, data: dict) -> dict:

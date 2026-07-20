@@ -75,6 +75,18 @@ export async function selectTask(id) {
   await http.post(`/api/tasks/${id}/select`)
 }
 
+/** 已加载的脚本/服务插件列表（设置未启用时 items 为空） */
+export async function listPlugins() {
+  const { data } = await http.get('/api/plugins')
+  return data
+}
+
+/** 运行插件：script 传 {}；service 传 { action: 'start'|'stop'|'status' } */
+export async function runPlugin(id, body = {}) {
+  const { data } = await http.post(`/api/plugins/${id}/run`, body)
+  return data
+}
+
 export async function listTemplates() {
   const { data } = await http.get('/api/templates')
   return data.items || []

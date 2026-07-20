@@ -30,6 +30,8 @@ class Task:
     reminder: Optional[TaskReminder] = None
     # v3.9 逾期自动废弃（常从周期模板继承）
     auto_abandon_on_overdue: bool = False
+    # 关联脚本/服务插件 id（plugin.yaml 的 id）；空表示未关联
+    plugin_id: Optional[str] = None
 
     def __post_init__(self):
         if self.attachments is None:
@@ -48,6 +50,9 @@ class Task:
             self.progress_logs = []
         if isinstance(self.reminder, dict):
             self.reminder = TaskReminder.from_dict(self.reminder)
+        # 规范化空字符串
+        if isinstance(self.plugin_id, str) and not self.plugin_id.strip():
+            self.plugin_id = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -92,6 +97,8 @@ class PeriodicTemplate:
     auto_abandon_on_overdue: bool = False
     long_term: bool = True  # True=长期有效；False 时看 schedule_end_date
     schedule_end_date: Optional[str] = None  # YYYY-MM-DD 停止派发日
+    # 派发实例时继承到 Task.plugin_id
+    plugin_id: Optional[str] = None
 
     def __post_init__(self):
         if self.details is None:
@@ -108,6 +115,8 @@ class PeriodicTemplate:
             self.interval = max(1, int(self.interval or 1))
         except (TypeError, ValueError):
             self.interval = 1
+        if isinstance(self.plugin_id, str) and not self.plugin_id.strip():
+            self.plugin_id = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
