@@ -104,6 +104,15 @@ export async function getSettings() {
   return data.settings
 }
 
+/**
+ * 检查弹窗提醒时间冲突（任务/周期模板/每日计划/复盘）
+ * body: { reminder, exclude_task_id?, exclude_template_id? }
+ */
+export async function checkReminderConflicts(body) {
+  const { data } = await http.post('/api/reminders/check-conflicts', body)
+  return data
+}
+
 export async function saveSettings(settings) {
   const { data } = await http.put('/api/settings', { settings })
   return data.settings

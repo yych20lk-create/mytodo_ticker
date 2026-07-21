@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 class NightlyJobWorker(QThread):
     """
     调度：每日计划 + 每日复盘（各自开关与时间）。
+
+    触发规则见 zentray.workers.ai_schedule：
+    - 到点或过点后补跑（不要求 hour 全等）
+    - 每日每 job 一次；状态落盘防重启重复
+    - 修改触发时刻后允许同日按新时刻再跑
     """
 
     job_completed = Signal(str, str)  # title, message
@@ -23,58 +28,101 @@ class NightlyJobWorker(QThread):
         super().__init__()
         self.is_running = True
         self.task_repo = task_repo
-        # 分别记录上次执行日
+        # 兼容旧属性名（测试/调试）；以 state 文件为准
         self.last_plan_date = None
         self.last_review_date = None
 
     def run(self):
+        from zentray.core.holidays import should_skip_auto_review
+        from zentray.services.settings_manager import SettingsManager
+        from zentray.workers import ai_schedule as sched
+
+        state = sched.load_state()
+        self.last_plan_date = state.last_plan_date
+        self.last_review_date = state.last_review_date
+        logger.info(
+            "AI 调度 worker 循环启动 last_plan=%s last_review=%s",
+            state.last_plan_date,
+            state.last_review_date,
+        )
+
         while self.is_running:
             now = datetime.datetime.now()
             today_str = now.strftime("%Y-%m-%d")
 
-            from zentray.core.holidays import should_skip_auto_review
-            from zentray.services.settings_manager import SettingsManager
-
+            # 每次迭代重新读设置（保存设置后无需重启 worker）
             settings = SettingsManager()
             ai = settings.ai
+            plan = ai.plan
+            review = ai.review
+
+            state = sched.sync_trigger_keys(
+                state,
+                plan_hour=int(plan.trigger_hour),
+                plan_minute=int(plan.trigger_minute),
+                review_hour=int(review.trigger_hour),
+                review_minute=int(review.trigger_minute),
+            )
+            self.last_plan_date = state.last_plan_date
+            self.last_review_date = state.last_review_date
 
             # —— 每日计划 ——
-            plan = ai.plan
-            if (
-                plan.enabled
-                and self.last_plan_date != today_str
-                and now.hour == int(plan.trigger_hour)
-                and now.minute >= int(plan.trigger_minute)
+            if sched.should_fire_job(
+                now,
+                enabled=bool(plan.enabled),
+                last_date=state.last_plan_date,
+                trigger_hour=int(plan.trigger_hour),
+                trigger_minute=int(plan.trigger_minute),
             ):
                 if should_skip_auto_review(
                     now.date(),
                     skip_weekends=bool(plan.skip_weekends),
                     skip_holidays=bool(plan.skip_holidays),
                 ):
+                    state.last_plan_date = today_str
                     self.last_plan_date = today_str
+                    sched.save_state(state)
                     logger.info("每日计划已跳过（周末/节假日）: %s", today_str)
                 else:
+                    logger.info(
+                        "触发每日计划 @%s (设定 %02d:%02d)",
+                        now.strftime("%H:%M"),
+                        int(plan.trigger_hour),
+                        int(plan.trigger_minute),
+                    )
                     self._run_plan(today_str)
+                    state.last_plan_date = today_str
                     self.last_plan_date = today_str
+                    sched.save_state(state)
 
             # —— 每日复盘 ——
-            review = ai.review
-            if (
-                review.enabled
-                and self.last_review_date != today_str
-                and now.hour == int(review.trigger_hour)
-                and now.minute >= int(review.trigger_minute)
+            if sched.should_fire_job(
+                now,
+                enabled=bool(review.enabled),
+                last_date=state.last_review_date,
+                trigger_hour=int(review.trigger_hour),
+                trigger_minute=int(review.trigger_minute),
             ):
                 if should_skip_auto_review(
                     now.date(),
                     skip_weekends=bool(review.skip_weekends),
                     skip_holidays=bool(review.skip_holidays),
                 ):
+                    state.last_review_date = today_str
                     self.last_review_date = today_str
+                    sched.save_state(state)
                     logger.info("每日复盘已跳过（周末/节假日）: %s", today_str)
                 else:
+                    logger.info(
+                        "触发每日复盘 @%s (设定 %02d:%02d)",
+                        now.strftime("%H:%M"),
+                        int(review.trigger_hour),
+                        int(review.trigger_minute),
+                    )
                     self._run_review(today_str)
+                    state.last_review_date = today_str
                     self.last_review_date = today_str
+                    sched.save_state(state)
 
             for _ in range(60):
                 if not self.is_running:
