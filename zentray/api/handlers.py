@@ -186,6 +186,9 @@ def handle_request(
             pid = path[len("/api/plugins/") : -len("/run")]
             return _run_plugin(pid, body)
 
+        if method == "POST" and path == "/api/reminders/check-conflicts":
+            return _check_reminder_conflicts(body)
+
         if method == "GET" and path == "/api/current-task":
             t = _ctx.task_service.get_current_task()
             return 200, {"item": _task_dict(t) if t else None}
@@ -294,6 +297,40 @@ def _plugins_list() -> dict:
         )
     busy = bool(runtime and runtime.is_busy)
     return {"enabled": True, "items": items, "busy": busy}
+
+
+def _check_reminder_conflicts(body: dict) -> tuple[int, dict]:
+    """检查候选弹窗提醒是否与已有任务/模板/AI 调度冲突。"""
+    from zentray.services.reminder_conflict import find_reminder_conflicts
+    from zentray.services.settings_manager import SettingsManager
+
+    reminder = body.get("reminder")
+    if not reminder or not isinstance(reminder, dict):
+        return 400, {"error": "reminder 必填"}
+    if not reminder.get("enabled"):
+        return 200, {"conflicts": [], "has_conflict": False}
+
+    sm = SettingsManager()
+    ai = sm.ai
+    conflicts = find_reminder_conflicts(
+        reminder,
+        tasks=_ctx.task_service.get_all_tasks() if _ctx.task_service else [],
+        templates=(
+            _ctx.task_service.get_all_templates() if _ctx.task_service else []
+        ),
+        exclude_task_id=body.get("exclude_task_id") or None,
+        exclude_template_id=body.get("exclude_template_id") or None,
+        plan_enabled=bool(ai.plan.enabled),
+        plan_hour=int(ai.plan.trigger_hour),
+        plan_minute=int(ai.plan.trigger_minute),
+        review_enabled=bool(ai.review.enabled),
+        review_hour=int(ai.review.trigger_hour),
+        review_minute=int(ai.review.trigger_minute),
+    )
+    return 200, {
+        "has_conflict": bool(conflicts),
+        "conflicts": conflicts,
+    }
 
 
 def _run_plugin(plugin_id: str, body: dict) -> tuple[int, dict]:

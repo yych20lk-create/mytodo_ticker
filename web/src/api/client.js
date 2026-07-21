@@ -87,6 +87,15 @@ export async function runPlugin(id, body = {}) {
   return data
 }
 
+/**
+ * 检查弹窗提醒时间冲突（任务/周期模板/每日计划/复盘）
+ * body: { reminder, exclude_task_id?, exclude_template_id? }
+ */
+export async function checkReminderConflicts(body) {
+  const { data } = await http.post('/api/reminders/check-conflicts', body)
+  return data
+}
+
 export async function listTemplates() {
   const { data } = await http.get('/api/templates')
   return data.items || []

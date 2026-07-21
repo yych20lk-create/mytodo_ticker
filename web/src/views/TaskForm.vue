@@ -225,7 +225,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 import {
@@ -237,6 +237,7 @@ import {
   getMeta,
   getTask,
   getTemplate,
+  checkReminderConflicts,
   listPlugins,
   runPlugin,
   updateTask,
@@ -520,6 +521,72 @@ async function onAddSecondary() {
   }
 }
 
+function formatConflictList(conflicts) {
+  if (!conflicts?.length) return ''
+  return conflicts
+    .map((c, i) => {
+      const kindLabel =
+        {
+          task: '任务',
+          template: '周期模板',
+          ai_plan: 'AI 计划',
+          ai_review: 'AI 复盘',
+        }[c.kind] || c.kind
+      return `${i + 1}. [${kindLabel}] ${c.title} — ${c.detail || c.time}`
+    })
+    .join('\n')
+}
+
+/**
+ * 弹窗提醒开启时检查与其它任务/模板/计划复盘调度是否同钟点冲突。
+ * 有冲突则弹确认；用户确认后继续保存。
+ */
+async function confirmReminderConflictsIfNeeded(payload) {
+  const rem = payload?.reminder
+  if (!rem?.enabled) return true
+  try {
+    const body = {
+      reminder: rem,
+      exclude_task_id:
+        isEdit.value && !isTemplate.value ? taskId.value : undefined,
+      exclude_template_id:
+        isEdit.value && isTemplate.value ? taskId.value : undefined,
+    }
+    const data = await checkReminderConflicts(body)
+    if (!data?.has_conflict || !data.conflicts?.length) return true
+    const list = formatConflictList(data.conflicts)
+    return await new Promise((resolve) => {
+      Modal.confirm({
+        title: '提醒时间冲突',
+        content: () =>
+          h(
+            'div',
+            {
+              style: {
+                whiteSpace: 'pre-line',
+                maxHeight: '260px',
+                overflow: 'auto',
+                fontSize: '13px',
+                lineHeight: '1.5',
+              },
+            },
+            `以下已有弹窗/调度与当前提醒时间冲突：\n\n${list}\n\n仍要保存吗？`,
+          ),
+        okText: '仍要保存',
+        cancelText: '返回修改',
+        simple: false,
+        width: 480,
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+  } catch (e) {
+    // 检查失败不阻塞保存，仅提示
+    Message.warning(e?.message || '冲突检查失败，将直接保存')
+    return true
+  }
+}
+
 async function onSave() {
   if (!form.title.trim()) {
     Message.warning('请输入标题')
@@ -537,9 +604,12 @@ async function onSave() {
     Message.warning('请至少添加一个提醒点')
     return
   }
+  const payload = buildPayload()
+  const ok = await confirmReminderConflictsIfNeeded(payload)
+  if (!ok) return
+
   saving.value = true
   try {
-    const payload = buildPayload()
     if (isEdit.value) {
       if (isTemplate.value) {
         await updateTemplate(taskId.value, payload)
