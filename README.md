@@ -4,7 +4,7 @@
 > 当前版本见 `zentray/config.py`（版本规则：[docs/VERSIONING.md](docs/VERSIONING.md)）。
 
 <p align="center">
-  <strong>📋 任务轮播 &nbsp;|&nbsp; 🍅 番茄专注 &nbsp;|&nbsp; 🧩 脚本与服务 &nbsp;|&nbsp; 🤖 AI 计划/复盘 &nbsp;|&nbsp; 📱 通知</strong>
+  <strong>📋 任务轮播 &nbsp;|&nbsp; 🍅 番茄专注 &nbsp;|&nbsp; 🧩 插件 &nbsp;|&nbsp; 🤖 AI 计划/复盘 &nbsp;|&nbsp; 📱 通知</strong>
 </p>
 
 > 📖 **用户手册**：[docs/USER_MANUAL.md](docs/USER_MANUAL.md)  
@@ -60,7 +60,7 @@ AI_MODEL_NAME=gpt-4o
 | **番茄钟** | 左：**番茄饼图**（随倒计时填充，带绿萼）；右：倒计时或自定义文案 |
 | **任务** | 新建/编辑/进度(10%步进)/完成/废弃；二级分类、截止、提醒 |
 | **周期任务** | 日/周/月模板自动派发 |
-| **脚本与服务** | 插件式本机脚本/服务（设置中开关）；执行时进度**抢占**任务轮播；任务可**关联插件**并在编辑/更新进度页一键运行；见 [插件规范](docs/plugins/PLUGIN_SPEC.md) |
+| **插件** | 插件式本机脚本/服务（设置中开关）；执行时进度**抢占**任务轮播；任务可**关联插件**并在编辑/更新进度页一键运行；见 [插件规范](docs/plugins/PLUGIN_SPEC.md) |
 | **闪电添加** | `Ctrl+Alt+T`（macOS：`Cmd+Alt+T`） |
 | **AI** | **每日计划** + **每日复盘**；多 API 配置（同时启用一个）；毒舌/温柔/干练 + 自定义提示词 |
 | **通知** | 固定渠道：应用弹窗、WxPusher（可同时开） |
@@ -80,16 +80,16 @@ AI_MODEL_NAME=gpt-4o
 
 业务逻辑在 **Python**；设置与业务弹窗优先 **Vue 3 + Arco Design**（无 `web/dist` 时回退 Qt）。
 
-### 脚本与服务（插件）速览
+### 插件速览
 
 ```bash
-# 1. 设置中开启「脚本与服务」
+# 1. 设置中开启「插件」
 # 2. 按规范编写插件后校验
 python scripts/validate_plugin.py path/to/plugin
 # 3. 放入用户插件目录（Linux 示例）
 mkdir -p ~/.local/share/ZenTray/plugins
 cp -a path/to/plugin ~/.local/share/ZenTray/plugins/
-# 4. 重启或保存设置后，托盘菜单 → 🧩 脚本与服务
+# 4. 重启或保存设置后，托盘菜单 → 🧩 插件
 ```
 
 完整约定：[docs/plugins/PLUGIN_SPEC.md](docs/plugins/PLUGIN_SPEC.md)。

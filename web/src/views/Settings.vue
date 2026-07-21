@@ -15,7 +15,7 @@
           <a-menu-item key="ai_hub">AI 与通知</a-menu-item>
           <a-menu-item key="polling">任务轮播</a-menu-item>
           <a-menu-item key="pomodoro">番茄钟</a-menu-item>
-          <a-menu-item key="ops">脚本与服务</a-menu-item>
+          <a-menu-item key="ops">插件</a-menu-item>
           <a-menu-item key="categories">分类</a-menu-item>
           <a-menu-item key="appearance">外观</a-menu-item>
         </a-menu>
@@ -383,62 +383,177 @@
           </template>
 
           <template v-else-if="mainKey === 'ops'">
-            <div class="poll-stack">
-              <section class="compact-block">
-                <div class="compact-row">
-                  <span class="compact-label">启用脚本与服务</span>
-                  <a-switch v-model="form.ops.enabled" size="small" />
+            <div class="plugin-settings">
+              <!-- 总开关 -->
+              <a-card class="plugin-card" :bordered="false" title="总开关">
+                <div class="plugin-switch-row">
+                  <div>
+                    <div class="plugin-title">启用插件</div>
+                    <div class="plugin-desc">
+                      开启后托盘菜单显示「🧩 插件」。仅加载通过
+                      <code>plugin.yaml</code> 校验的目录。
+                    </div>
+                  </div>
+                  <a-switch v-model="form.ops.enabled" />
                 </div>
-                <p class="hint">
-                  开启后，托盘菜单顶部出现「🧩 脚本与服务」。插件须符合
-                  <code>plugin.yaml</code> 规范并通过校验后才会加载。
-                </p>
-              </section>
+              </a-card>
 
-              <section class="compact-block" :class="{ 'is-disabled': !form.ops.enabled }">
-                <div class="compact-row">
-                  <span class="compact-label">加载内置插件</span>
-                  <a-switch v-model="form.ops.load_bundled" size="small" :disabled="!form.ops.enabled" />
-                </div>
-                <div class="compact-row">
-                  <span class="compact-label">加载用户插件</span>
-                  <a-switch v-model="form.ops.load_user" size="small" :disabled="!form.ops.enabled" />
-                </div>
-                <div class="compact-row">
-                  <span class="compact-label">用户插件目录</span>
-                  <a-input
-                    v-model="form.ops.user_plugins_dir"
-                    placeholder="留空 = 数据目录/plugins"
-                    :disabled="!form.ops.enabled || !form.ops.load_user"
-                    style="max-width: 320px"
-                  />
-                </div>
-                <div class="compact-row">
-                  <span class="compact-label">执行前确认</span>
-                  <a-switch
-                    v-model="form.ops.confirm_before_run"
+              <!-- 加载选项 -->
+              <a-card
+                class="plugin-card"
+                :bordered="false"
+                title="加载选项"
+                :class="{ 'plugin-card-muted': !form.ops.enabled }"
+              >
+                <a-row :gutter="[16, 16]">
+                  <a-col :xs="24" :sm="12">
+                    <div class="plugin-field">
+                      <span class="plugin-field-label">加载内置插件</span>
+                      <a-switch
+                        v-model="form.ops.load_bundled"
+                        :disabled="!form.ops.enabled"
+                      />
+                    </div>
+                  </a-col>
+                  <a-col :xs="24" :sm="12">
+                    <div class="plugin-field">
+                      <span class="plugin-field-label">加载用户插件</span>
+                      <a-switch
+                        v-model="form.ops.load_user"
+                        :disabled="!form.ops.enabled"
+                      />
+                    </div>
+                  </a-col>
+                  <a-col :span="24">
+                    <div class="plugin-field-col">
+                      <span class="plugin-field-label">用户插件目录</span>
+                      <a-input
+                        v-model="form.ops.user_plugins_dir"
+                        :disabled="!form.ops.enabled || !form.ops.load_user"
+                        :placeholder="pluginUserDirHint || '留空 = 数据目录/plugins'"
+                        allow-clear
+                      />
+                    </div>
+                  </a-col>
+                  <a-col :xs="24" :sm="12">
+                    <div class="plugin-field">
+                      <span class="plugin-field-label">运行前确认</span>
+                      <a-switch
+                        v-model="form.ops.confirm_before_run"
+                        :disabled="!form.ops.enabled"
+                      />
+                    </div>
+                  </a-col>
+                  <a-col :xs="24" :sm="12">
+                    <div class="plugin-field-col">
+                      <span class="plugin-field-label">托盘左键</span>
+                      <a-select
+                        v-model="form.ops.tray_left_click"
+                        :disabled="!form.ops.enabled"
+                        :options="pluginLeftClickOpts"
+                      />
+                    </div>
+                  </a-col>
+                </a-row>
+              </a-card>
+
+              <!-- 已安装列表 -->
+              <a-card class="plugin-card" :bordered="false">
+                <template #title>
+                  <span>已安装插件</span>
+                  <a-tag size="small" style="margin-left: 8px" color="arcoblue">
+                    {{ pluginListItems.length }}
+                  </a-tag>
+                </template>
+                <template #extra>
+                  <a-button size="mini" type="text" :loading="pluginListLoading" @click="refreshPluginList">
+                    刷新
+                  </a-button>
+                </template>
+                <a-spin :loading="pluginListLoading" style="width: 100%">
+                  <a-table
+                    v-if="pluginListItems.length"
+                    :data="pluginListItems"
+                    :columns="pluginColumns"
+                    :pagination="false"
                     size="small"
-                    :disabled="!form.ops.enabled"
-                  />
-                </div>
-                <div class="compact-row">
-                  <span class="compact-label">左键点击托盘</span>
-                  <a-radio-group
-                    v-model="form.ops.tray_left_click"
-                    size="small"
-                    :disabled="!form.ops.enabled"
+                    row-key="id"
+                    :bordered="{ cell: true }"
                   >
-                    <a-radio value="task_menu">任务菜单</a-radio>
-                    <a-radio value="ops_menu">脚本与服务（菜单仍含全部项，入口置顶）</a-radio>
-                  </a-radio-group>
-                </div>
-              </section>
+                    <template #type="{ record }">
+                      <a-tag size="small" :color="record.type === 'service' ? 'orangered' : 'green'">
+                        {{ record.type === 'service' ? '服务' : '脚本' }}
+                      </a-tag>
+                    </template>
+                    <template #source="{ record }">
+                      {{ record.source === 'bundled' ? '内置' : '用户' }}
+                    </template>
+                  </a-table>
+                  <a-empty v-else description="暂无已加载插件" />
+                  <div v-if="pluginFailures.length" class="plugin-fail-box">
+                    <div class="plugin-fail-title">校验失败（未加载）</div>
+                    <div v-for="(f, i) in pluginFailures" :key="i" class="plugin-fail-item">
+                      <code>{{ f.path }}</code>
+                      <ul>
+                        <li v-for="(e, j) in f.errors" :key="j">{{ e }}</li>
+                      </ul>
+                    </div>
+                  </div>
+                </a-spin>
+              </a-card>
 
-              <a-alert type="info">
-                插件规范见仓库 <code>docs/plugins/PLUGIN_SPEC.md</code>。
-                校验：<code>python scripts/validate_plugin.py &lt;插件目录&gt;</code>。
-                默认用户目录：Linux <code>~/.local/share/ZenTray/plugins/</code>。
-              </a-alert>
+              <!-- 添加 / 预览 -->
+              <a-card class="plugin-card" :bordered="false" title="添加插件">
+                <p class="plugin-desc" style="margin-bottom: 12px">
+                  填写本机插件目录路径（含 <code>plugin.yaml</code>），先预览校验，通过后再安装到用户目录。
+                </p>
+                <div class="plugin-add-row">
+                  <a-input
+                    v-model="pluginAddPath"
+                    placeholder="例如 ~/.local/share/ZenTray/plugins/my-plugin 或绝对路径"
+                    allow-clear
+                    @press-enter="onPreviewPlugin"
+                  />
+                  <a-button type="outline" :loading="pluginPreviewing" @click="onPreviewPlugin">
+                    预览校验
+                  </a-button>
+                  <a-button
+                    type="primary"
+                    :loading="pluginInstalling"
+                    :disabled="!pluginPreview?.ok"
+                    @click="onInstallPlugin"
+                  >
+                    安装
+                  </a-button>
+                </div>
+
+                <div v-if="pluginPreview" class="plugin-preview" :class="{ ok: pluginPreview.ok, bad: !pluginPreview.ok }">
+                  <div class="plugin-preview-head">
+                    <a-tag :color="pluginPreview.ok ? 'green' : 'red'" size="small">
+                      {{ pluginPreview.ok ? '校验通过' : '校验失败' }}
+                    </a-tag>
+                    <span class="muted">{{ pluginPreview.path }}</span>
+                  </div>
+                  <template v-if="pluginPreview.ok && pluginPreview.preview">
+                    <a-descriptions :column="2" size="small" bordered>
+                      <a-descriptions-item label="名称">{{ pluginPreview.preview.name }}</a-descriptions-item>
+                      <a-descriptions-item label="ID">{{ pluginPreview.preview.id }}</a-descriptions-item>
+                      <a-descriptions-item label="类型">{{ pluginPreview.preview.type }}</a-descriptions-item>
+                      <a-descriptions-item label="版本">{{ pluginPreview.preview.version }}</a-descriptions-item>
+                      <a-descriptions-item label="入口">{{ pluginPreview.preview.entry }}</a-descriptions-item>
+                      <a-descriptions-item label="超时">
+                        {{ pluginPreview.preview.timeout_sec }}s
+                      </a-descriptions-item>
+                      <a-descriptions-item label="说明" :span="2">
+                        {{ pluginPreview.preview.description || '—' }}
+                      </a-descriptions-item>
+                    </a-descriptions>
+                  </template>
+                  <ul v-if="pluginPreview.errors?.length" class="plugin-err-list">
+                    <li v-for="(e, i) in pluginPreview.errors" :key="i">{{ e }}</li>
+                  </ul>
+                </div>
+              </a-card>
             </div>
           </template>
 
@@ -470,10 +585,19 @@
 import { computed, inject, onMounted, reactive, ref } from 'vue'
 // NumberSpinner / JobEditor already imported below
 import { Message } from '@arco-design/web-vue'
-import { cancelHost, closeHost, getSettings, saveSettings } from '@/api/client'
+import {
+  cancelHost,
+  closeHost,
+  getSettings,
+  installPluginPath,
+  listPlugins,
+  saveSettings,
+  validatePluginPath,
+} from '@/api/client'
 import { applyTheme } from '@/theme'
 import JobEditor from '@/components/JobEditor.vue'
 import NumberSpinner from '@/components/NumberSpinner.vue'
+import { Modal } from '@arco-design/web-vue'
 
 const setThemeMode = inject('setThemeMode', null)
 const loading = ref(false)
@@ -482,6 +606,28 @@ const mainKey = ref('ai_hub')
 const aiTab = ref('api')
 const apiExpandKeys = ref([])
 const notifyExpandKeys = ref([])
+
+// —— 插件设置页 ——
+const pluginListLoading = ref(false)
+const pluginListItems = ref([])
+const pluginFailures = ref([])
+const pluginUserDirHint = ref('')
+const pluginAddPath = ref('')
+const pluginPreviewing = ref(false)
+const pluginInstalling = ref(false)
+const pluginPreview = ref(null)
+const pluginLeftClickOpts = [
+  { label: '任务菜单', value: 'task_menu' },
+  { label: '插件菜单优先', value: 'ops_menu' },
+]
+const pluginColumns = [
+  { title: '名称', dataIndex: 'name', width: 130 },
+  { title: 'ID', dataIndex: 'id', width: 110 },
+  { title: '类型', slotName: 'type', width: 72 },
+  { title: '来源', slotName: 'source', width: 64 },
+  { title: '版本', dataIndex: 'version', width: 72 },
+  { title: '说明', dataIndex: 'description', ellipsis: true, tooltip: true },
+]
 
 const form = reactive(emptyForm())
 
@@ -564,6 +710,95 @@ function onWrapPreset(key) {
   const w = WRAP_PRESETS.find((x) => x.key === key) || WRAP_PRESETS[0]
   form.categories.wrap_left = w.left
   form.categories.wrap_right = w.right
+}
+
+async function refreshPluginList() {
+  pluginListLoading.value = true
+  try {
+    const data = await listPlugins()
+    pluginListItems.value = data.items || []
+    pluginFailures.value = data.failures || []
+    if (data.user_dir) pluginUserDirHint.value = data.user_dir
+  } catch (e) {
+    pluginListItems.value = []
+    pluginFailures.value = []
+    Message.warning(e?.message || '加载插件列表失败')
+  } finally {
+    pluginListLoading.value = false
+  }
+}
+
+async function onPreviewPlugin() {
+  const path = (pluginAddPath.value || '').trim()
+  if (!path) {
+    Message.warning('请填写插件目录路径')
+    return
+  }
+  pluginPreviewing.value = true
+  pluginPreview.value = null
+  try {
+    const data = await validatePluginPath(path)
+    pluginPreview.value = data
+    if (data.ok) Message.success('校验通过')
+    else Message.error('校验未通过，见下方错误')
+  } catch (e) {
+    const err = e?.response?.data
+    pluginPreview.value = {
+      ok: false,
+      errors: err?.errors || [err?.error || e?.message || '校验请求失败'],
+      preview: null,
+      path,
+    }
+  } finally {
+    pluginPreviewing.value = false
+  }
+}
+
+async function onInstallPlugin() {
+  const path = (pluginAddPath.value || '').trim()
+  if (!path || !pluginPreview.value?.ok) {
+    Message.warning('请先预览校验并通过')
+    return
+  }
+  const doInstall = async (overwrite = false) => {
+    pluginInstalling.value = true
+    try {
+      const data = await installPluginPath(path, { overwrite })
+      Message.success(data.message || '安装成功')
+      if (data.plugins) {
+        pluginListItems.value = data.plugins.items || []
+        pluginFailures.value = data.plugins.failures || []
+        if (data.plugins.user_dir) pluginUserDirHint.value = data.plugins.user_dir
+      } else {
+        await refreshPluginList()
+      }
+      pluginAddPath.value = ''
+      pluginPreview.value = null
+    } catch (e) {
+      const status = e?.response?.status
+      const err = e?.response?.data
+      if (status === 409) {
+        Modal.confirm({
+          title: '目标已存在',
+          content: err?.error || '是否覆盖安装？',
+          okText: '覆盖',
+          onOk: () => doInstall(true),
+        })
+      } else {
+        Message.error(err?.error || e?.message || '安装失败')
+      }
+    } finally {
+      pluginInstalling.value = false
+    }
+  }
+  await doInstall(false)
+}
+
+function onMainNav(key) {
+  mainKey.value = key
+  if (key === 'ops') {
+    refreshPluginList()
+  }
 }
 
 function addPrimary() {
@@ -664,10 +899,6 @@ function shortKey(k) {
   if (!k) return '未填 Key'
   if (k.length <= 8) return '••••'
   return k.slice(0, 3) + '…' + k.slice(-4)
-}
-
-function onMainNav(key) {
-  mainKey.value = key
 }
 
 function onThemePreview() {
@@ -870,12 +1101,122 @@ onMounted(async () => {
 .settings-body.is-ai :deep(.arco-tabs-content-list) {
   height: auto;
 }
-.is-disabled {
-  opacity: 0.55;
-  pointer-events: none;
+/* —— 插件设置页 —— */
+.plugin-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 760px;
+  padding-bottom: 8px;
 }
-.is-disabled .compact-row {
-  pointer-events: none;
+.plugin-card {
+  background: var(--color-fill-1, #f7f8fa);
+  border-radius: 10px;
+}
+.plugin-card :deep(.arco-card-header) {
+  padding: 12px 16px 0;
+  border: none;
+}
+.plugin-card :deep(.arco-card-body) {
+  padding: 12px 16px 16px;
+}
+.plugin-card-muted {
+  opacity: 0.65;
+}
+.plugin-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.plugin-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text-1);
+}
+.plugin-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-3);
+  line-height: 1.45;
+}
+.plugin-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+}
+.plugin-field-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plugin-field-label {
+  font-size: 13px;
+  color: var(--color-text-2);
+  white-space: nowrap;
+}
+.plugin-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.plugin-add-row .arco-input-wrapper,
+.plugin-add-row > .arco-input {
+  flex: 1;
+  min-width: 200px;
+}
+.plugin-preview {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-2);
+  background: var(--color-bg-2, #fff);
+}
+.plugin-preview.ok {
+  border-color: rgb(var(--green-6, 0 180 42));
+}
+.plugin-preview.bad {
+  border-color: rgb(var(--red-6, 245 63 63));
+}
+.plugin-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.plugin-err-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: rgb(var(--red-6, 245 63 63));
+  font-size: 12px;
+}
+.plugin-fail-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--color-danger-light-1, #ffece8);
+  font-size: 12px;
+}
+.plugin-fail-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--color-text-1);
+}
+.plugin-fail-item {
+  margin-bottom: 8px;
+}
+.plugin-fail-item ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--color-text-2);
+}
+.plugin-fail-item code {
+  font-size: 11px;
+  word-break: break-all;
 }
 
 .section {

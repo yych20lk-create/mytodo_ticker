@@ -149,7 +149,7 @@ class TrayController(QObject):
             load_user=ops.load_user,
         )
         logger.info(
-            "脚本与服务插件已加载 %s 个（失败 %s）",
+            "插件已加载 %s 个（失败 %s）",
             len(self._ops_plugins),
             len(self.plugin_loader.failures),
         )

@@ -22,7 +22,7 @@ class MenuBuilder:
         return items
 
     def build_ops_submenu(self, plugins: list = None) -> Optional[dict]:
-        """构建「脚本与服务」子菜单；无插件时仍返回入口（空提示）。"""
+        """构建「插件」子菜单；无插件时仍返回入口（空提示）。"""
         plugins = plugins or []
         scripts = []
         services = []
@@ -62,7 +62,7 @@ class MenuBuilder:
             })
         submenu.append("separator")
         submenu.append({"id": "ops.open_last_log", "label": "📄 上次运行日志"})
-        return {"id": "ops_menu", "label": "🧩 脚本与服务", "submenu": submenu}
+        return {"id": "ops_menu", "label": "🧩 插件", "submenu": submenu}
 
     def build_main_menu(
         self,

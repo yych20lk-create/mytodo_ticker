@@ -118,8 +118,8 @@
                     :disabled="!pluginsEnabled"
                     :placeholder="
                       pluginsEnabled
-                        ? '可选：关联脚本/服务插件'
-                        : '请先在设置中启用「脚本与服务」'
+                        ? '可选：关联插件'
+                        : '请先在设置中启用「插件」'
                     "
                     style="flex: 1"
                   />

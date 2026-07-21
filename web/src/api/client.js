@@ -75,9 +75,21 @@ export async function selectTask(id) {
   await http.post(`/api/tasks/${id}/select`)
 }
 
-/** 已加载的脚本/服务插件列表（设置未启用时 items 为空） */
+/** 插件列表（含 failures；设置页可扫描） */
 export async function listPlugins() {
   const { data } = await http.get('/api/plugins')
+  return data
+}
+
+/** 预览校验插件目录（不安装） */
+export async function validatePluginPath(path) {
+  const { data } = await http.post('/api/plugins/validate', { path })
+  return data
+}
+
+/** 校验通过后安装到用户插件目录 */
+export async function installPluginPath(path, { overwrite = false } = {}) {
+  const { data } = await http.post('/api/plugins/install', { path, overwrite })
   return data
 }
 

@@ -1,4 +1,4 @@
-"""脚本与服务插件运行时。"""
+"""插件运行时。"""
 from zentray.plugins.loader import LoadedPlugin, PluginLoader
 from zentray.plugins.manifest import ValidationResult, validate_plugin_dir
 from zentray.plugins.models import PluginManifest, PluginType

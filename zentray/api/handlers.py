@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -180,7 +181,13 @@ def handle_request(
             return 200, {"settings": _settings_dict()}
 
         if method == "GET" and path == "/api/plugins":
-            return 200, _plugins_list()
+            return 200, _plugins_list(scan_always=True)
+
+        if method == "POST" and path == "/api/plugins/validate":
+            return _validate_plugin_path(body or {})
+
+        if method == "POST" and path == "/api/plugins/install":
+            return _install_plugin_path(body or {})
 
         if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/run"):
             pid = path[len("/api/plugins/") : -len("/run")]
@@ -259,25 +266,44 @@ def _settings_dict() -> dict:
     }
 
 
-def _plugins_list() -> dict:
-    """已加载且校验通过的插件（依赖设置启用 + loader 扫描）。"""
+def _plugins_list(*, scan_always: bool = False) -> dict:
+    """插件列表（含校验失败项）。scan_always 供设置页在未启用时也扫描展示。"""
     from zentray.resources import get_resource_path
     from zentray.services.settings_manager import SettingsManager
 
     sm = SettingsManager()
-    if not sm.ops.enabled:
-        return {"enabled": False, "items": []}
+    user_dir = sm.get_ops_user_plugins_dir()
+    bundled = get_resource_path("bundled_plugins")
+    base = {
+        "enabled": bool(sm.ops.enabled),
+        "user_dir": str(user_dir),
+        "bundled_dir": str(bundled) if bundled.is_dir() else "",
+        "items": [],
+        "failures": [],
+        "busy": False,
+    }
+    if not sm.ops.enabled and not scan_always:
+        return base
+
     loader = _ctx.plugin_loader
     runtime = _ctx.plugin_runtime
     if loader is None:
-        return {"enabled": True, "items": [], "busy": False}
-    # 每次列表时重扫，便于用户刚拷贝插件
-    bundled = get_resource_path("bundled_plugins")
+        from zentray.plugins.loader import PluginLoader
+
+        loader = PluginLoader()
+
+    # 设置页总是按开关扫描对应来源；未启用时仍扫两边便于预览
+    load_bundled = sm.ops.load_bundled if sm.ops.enabled else True
+    load_user = sm.ops.load_user if sm.ops.enabled else True
+    if scan_always and not sm.ops.enabled:
+        load_bundled = True
+        load_user = True
+
     loader.scan(
         bundled_dir=bundled if bundled.is_dir() else None,
-        user_dir=sm.get_ops_user_plugins_dir(),
-        load_bundled=sm.ops.load_bundled,
-        load_user=sm.ops.load_user,
+        user_dir=user_dir,
+        load_bundled=load_bundled,
+        load_user=load_user,
     )
     items = []
     for p in loader.plugins:
@@ -290,10 +316,152 @@ def _plugins_list() -> dict:
                 "version": m.version,
                 "description": m.description or "",
                 "source": p.source,
+                "entry": m.entry,
+                "root": str(m.root),
+                "status": "ok",
             }
         )
-    busy = bool(runtime and runtime.is_busy)
-    return {"enabled": True, "items": items, "busy": busy}
+    failures = []
+    for path, result in loader.failures:
+        failures.append(
+            {
+                "path": str(path),
+                "errors": list(result.errors),
+                "status": "invalid",
+            }
+        )
+    base["items"] = items
+    base["failures"] = failures
+    base["busy"] = bool(runtime and runtime.is_busy)
+    return base
+
+
+def _safe_plugin_path(raw: str) -> tuple[Optional[Path], Optional[str]]:
+    """解析并限制插件路径范围（用户家目录 / 数据目录 / 内置目录）。"""
+    from zentray.config import DATA_DIR
+    from zentray.resources import get_resource_path
+    from zentray.services.settings_manager import SettingsManager
+
+    if not raw or not str(raw).strip():
+        return None, "path 必填"
+    path = Path(str(raw).strip()).expanduser().resolve()
+    if not path.exists():
+        return None, f"路径不存在: {path}"
+    if not path.is_dir():
+        return None, "path 必须是插件目录"
+    allowed = [
+        Path.home().resolve(),
+        Path(DATA_DIR).resolve(),
+        SettingsManager().get_ops_user_plugins_dir().resolve(),
+    ]
+    bundled = get_resource_path("bundled_plugins")
+    if bundled.is_dir():
+        allowed.append(bundled.resolve())
+    # 项目开发根
+    try:
+        from zentray.config import _PROJECT_ROOT
+
+        allowed.append(Path(_PROJECT_ROOT).resolve())
+    except Exception:
+        pass
+    ok = False
+    for root in allowed:
+        try:
+            path.relative_to(root)
+            ok = True
+            break
+        except ValueError:
+            continue
+    if not ok:
+        return None, "路径不在允许范围内（用户主目录 / 数据目录 / 项目或内置插件目录）"
+    return path, None
+
+
+def _validate_plugin_path(body: dict) -> tuple[int, dict]:
+    """预览校验：不安装，仅返回 manifest 预览与错误。"""
+    from zentray.plugins.manifest import validate_plugin_dir
+
+    path, err = _safe_plugin_path(body.get("path") or "")
+    if err:
+        return 400, {"ok": False, "errors": [err], "preview": None}
+    result = validate_plugin_dir(path)
+    preview = None
+    if result.manifest is not None:
+        m = result.manifest
+        preview = {
+            "id": m.id,
+            "name": m.name,
+            "type": m.type.value,
+            "version": m.version,
+            "entry": m.entry,
+            "description": m.description or "",
+            "timeout_sec": m.timeout_sec,
+            "root": str(m.root),
+        }
+    return 200, {
+        "ok": result.ok,
+        "errors": list(result.errors),
+        "preview": preview,
+        "path": str(path),
+    }
+
+
+def _install_plugin_path(body: dict) -> tuple[int, dict]:
+    """校验通过后复制到用户插件目录。"""
+    import shutil
+
+    from zentray.plugins.manifest import validate_plugin_dir
+    from zentray.services.settings_manager import SettingsManager
+
+    path, err = _safe_plugin_path(body.get("path") or "")
+    if err:
+        return 400, {"ok": False, "error": err}
+    result = validate_plugin_dir(path)
+    if not result.ok or result.manifest is None:
+        return 400, {
+            "ok": False,
+            "error": "校验未通过",
+            "errors": list(result.errors),
+        }
+    sm = SettingsManager()
+    user_dir = sm.get_ops_user_plugins_dir()
+    user_dir.mkdir(parents=True, exist_ok=True)
+    dest_name = result.manifest.id
+    dest = (user_dir / dest_name).resolve()
+    # 禁止安装到自身
+    if dest == path.resolve():
+        return 200, {
+            "ok": True,
+            "message": "插件已在用户目录中",
+            "dest": str(dest),
+            "plugins": _plugins_list(scan_always=True),
+        }
+    try:
+        dest.relative_to(user_dir.resolve())
+    except ValueError:
+        return 400, {"ok": False, "error": "目标目录非法"}
+    if dest.exists():
+        force = bool(body.get("overwrite"))
+        if not force:
+            return 409, {
+                "ok": False,
+                "error": f"目标已存在: {dest.name}，可传 overwrite=true 覆盖",
+                "dest": str(dest),
+            }
+        shutil.rmtree(dest)
+    shutil.copytree(path, dest)
+    # 确保 sh 可执行
+    for sh in dest.rglob("*.sh"):
+        try:
+            sh.chmod(sh.stat().st_mode | 0o111)
+        except OSError:
+            pass
+    return 200, {
+        "ok": True,
+        "message": f"已安装到 {dest}",
+        "dest": str(dest),
+        "plugins": _plugins_list(scan_always=True),
+    }
 
 
 def _run_plugin(plugin_id: str, body: dict) -> tuple[int, dict]:
@@ -302,7 +470,7 @@ def _run_plugin(plugin_id: str, body: dict) -> tuple[int, dict]:
     from zentray.services.settings_manager import SettingsManager
 
     if not SettingsManager().ops.enabled:
-        return 400, {"error": "脚本与服务未启用"}
+        return 400, {"error": "插件功能未启用"}
     loader = _ctx.plugin_loader
     runtime = _ctx.plugin_runtime
     if not loader or not runtime:

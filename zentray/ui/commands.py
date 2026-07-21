@@ -383,7 +383,7 @@ def dispatch(action_id: str, controller: "TrayController") -> bool:
 
 
 def _dispatch_ops_action(action_id: str, controller: "TrayController") -> bool:
-    """脚本与服务插件菜单。"""
+    """插件菜单。"""
     from PySide6.QtWidgets import QMessageBox
 
     if action_id in ("ops._empty", "ops._hdr_scripts", "ops._hdr_services", "ops_menu"):
@@ -398,7 +398,7 @@ def _dispatch_ops_action(action_id: str, controller: "TrayController") -> bool:
 
         last = DATA_DIR / "ops_runs" / "last.json"
         if not last.is_file():
-            controller.renderer.show_notification("脚本与服务", "尚无运行记录")
+            controller.renderer.show_notification("插件", "尚无运行记录")
             return True
         try:
             import json
@@ -414,7 +414,7 @@ def _dispatch_ops_action(action_id: str, controller: "TrayController") -> bool:
                     subprocess.Popen(["cmd", "/c", "start", "", str(log_path)])
             else:
                 controller.renderer.show_notification(
-                    "脚本与服务", data.get("summary") or "无日志文件"
+                    "插件", data.get("summary") or "无日志文件"
                 )
         except Exception as e:
             controller.renderer.show_notification("打开日志失败", str(e)[:100])
@@ -429,11 +429,11 @@ def _dispatch_ops_action(action_id: str, controller: "TrayController") -> bool:
         pid = action_id[len("ops.script.") :]
         plug = loader.get(pid)
         if not plug:
-            controller.renderer.show_notification("脚本与服务", f"插件不存在: {pid}")
+            controller.renderer.show_notification("插件", f"插件不存在: {pid}")
             return True
         if controller.pomodoro_service.is_active:
             controller.renderer.show_notification(
-                "脚本与服务", "番茄钟进行中，请先结束专注。"
+                "插件", "番茄钟进行中，请先结束专注。"
             )
             return True
         sm = controller._settings
@@ -464,11 +464,11 @@ def _dispatch_ops_action(action_id: str, controller: "TrayController") -> bool:
             return True
         plug = loader.get(pid)
         if not plug:
-            controller.renderer.show_notification("脚本与服务", f"插件不存在: {pid}")
+            controller.renderer.show_notification("插件", f"插件不存在: {pid}")
             return True
         if act in ("start", "stop") and controller.pomodoro_service.is_active:
             controller.renderer.show_notification(
-                "脚本与服务", "番茄钟进行中，请先结束专注。"
+                "插件", "番茄钟进行中，请先结束专注。"
             )
             return True
         ok = runtime.service_cmd(

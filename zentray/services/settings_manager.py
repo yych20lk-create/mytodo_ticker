@@ -137,7 +137,7 @@ class AppearanceSettings:
 
 @dataclass
 class OpsSettings:
-    """脚本与服务插件运行时。"""
+    """插件运行时设置（settings.json 字段名 ops 保持兼容）。"""
 
     enabled: bool = False
     load_bundled: bool = True

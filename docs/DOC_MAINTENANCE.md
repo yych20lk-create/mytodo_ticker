@@ -8,7 +8,7 @@
 |----------|--------|
 | 用户可见功能（菜单、设置、托盘行为） | `README.md` 功能表 + `docs/USER_MANUAL.md` |
 | 安装/打包/依赖 | `README.md` + 手册对应平台章节 |
-| 插件规范 / 校验 / 目录 | `docs/plugins/PLUGIN_SPEC.md` + README 插件速览 + 手册「脚本与服务」 |
+| 插件规范 / 校验 / 目录 | `docs/plugins/PLUGIN_SPEC.md` + README 插件速览 + 手册「插件」 |
 | 设置项增删 | 手册「设置」表 + 必要时 README |
 | 仅内部重构、无行为变化 | 可不改用户文档；若架构图失效则改 README 架构节 |
 
