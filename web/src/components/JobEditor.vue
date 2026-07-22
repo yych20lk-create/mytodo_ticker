@@ -244,6 +244,14 @@ watch(
   () => [model.value?.trigger_hour, model.value?.trigger_minute],
   () => syncTextFromModel(),
 )
+
+// 输入完整 HH:mm 时即时写回 model，避免未失焦点保存导致仍是旧时刻
+watch(timeText, (v) => {
+  const s = String(v || '').trim()
+  if (/^\d{1,2}\s*[:：]\s*\d{1,2}$/.test(s)) {
+    parseTime(s)
+  }
+})
 </script>
 
 <style scoped>
