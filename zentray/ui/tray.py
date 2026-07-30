@@ -276,6 +276,85 @@ class QtStandardTray(TrayImplementation):
         self.tray.hide()
 
 
+class WindowsTaskbarTray(QtStandardTray):
+    """
+    Windows 专属任务栏后端：
+    继承 QtStandardTray 保持右下角系统托盘菜单能力；
+    同时维护一个 Taskbar Window，将任务标题与进度跑马灯动态同步更新至 Windows 正下方任务栏按钮项（Taskbar Item）。
+    """
+
+    def __init__(self, app):
+        super().__init__(app)
+        from PySide6.QtWidgets import QWidget
+        from PySide6.QtCore import Qt
+
+        # 创建常驻任务栏项窗口（无边框，在 Windows 任务栏产生应用按钮）
+        self.taskbar_window = QWidget()
+        self.taskbar_window.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+        )
+        self.taskbar_window.setWindowTitle("ZenTray")
+        if self._app_icon_path:
+            self.taskbar_window.setWindowIcon(QIcon(self._app_icon_path))
+
+        # 挂载窗口（设为最小尺寸/1x1，防止弹主窗口遮挡用户）
+        self.taskbar_window.resize(1, 1)
+        self.taskbar_window.move(-10000, -10000)
+        self.taskbar_window.show()
+
+        # 跑马灯滚动控制
+        self._full_text = "ZenTray"
+        self._marquee_offset = 0
+        self._marquee_timer = QTimer(self)
+        self._marquee_timer.setInterval(400)  # 每 400ms 步进滚动一位
+        self._marquee_timer.timeout.connect(self._on_marquee_tick)
+
+        logger.info("WindowsTaskbarTray 已启动：任务栏应用按钮常驻与跑马灯轮播已生效")
+
+    def set_label(self, text: str):
+        super().set_label(text)
+        self._full_text = text.strip() if text else "ZenTray"
+        self._marquee_offset = 0
+        self._update_taskbar_title()
+
+        # 标题长度超过 12 字符时自动开启跑马灯动画
+        if len(self._full_text) > 12:
+            if not self._marquee_timer.isActive():
+                self._marquee_timer.start()
+        else:
+            if self._marquee_timer.isActive():
+                self._marquee_timer.stop()
+
+    def _on_marquee_tick(self):
+        if not self._full_text or len(self._full_text) <= 12:
+            return
+        self._marquee_offset = (self._marquee_offset + 1) % (len(self._full_text) + 4)
+        self._update_taskbar_title()
+
+    def _update_taskbar_title(self):
+        if not self._full_text:
+            self.taskbar_window.setWindowTitle("ZenTray")
+            return
+
+        if len(self._full_text) <= 12:
+            display_str = self._full_text
+        else:
+            padded = self._full_text + "   ·   "
+            display_str = padded[self._marquee_offset :] + padded[: self._marquee_offset]
+            display_str = display_str[:16]
+
+        self.taskbar_window.setWindowTitle(display_str)
+
+    def shutdown(self):
+        super().shutdown()
+        if hasattr(self, "_marquee_timer") and self._marquee_timer.isActive():
+            self._marquee_timer.stop()
+        if hasattr(self, "taskbar_window") and self.taskbar_window:
+            self.taskbar_window.close()
+
+
 def _appindicator_available() -> bool:
     probes = [
         "import gi; gi.require_version('AyatanaAppIndicator3','0.1')",
@@ -298,6 +377,7 @@ def _appindicator_available() -> bool:
 def create_tray_backend(app) -> TrayImplementation:
     """
     Linux：优先顶栏 AppIndicator（文字轮播）。
+    Windows：优先任务栏应用按钮常驻与标题跑马灯（WindowsTaskbarTray）。
     其它平台 / 无 Indicator：Qt 托盘。
     """
     if sys.platform.startswith("linux") and _appindicator_available():
@@ -307,4 +387,13 @@ def create_tray_backend(app) -> TrayImplementation:
             return backend
         except Exception:
             logger.exception("AppIndicator 桥接启动失败，回退 Qt 托盘")
+    elif sys.platform.startswith("win32"):
+        try:
+            backend = WindowsTaskbarTray(app)
+            logger.info("托盘后端: WindowsTaskbarTray (正下方任务栏常驻与标题滚动)")
+            return backend
+        except Exception:
+            logger.exception("Windows 任务栏后端启动失败，回退 Qt 托盘")
+
     return QtStandardTray(app)
+
