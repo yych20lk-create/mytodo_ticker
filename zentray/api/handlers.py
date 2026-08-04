@@ -180,6 +180,7 @@ def handle_request(
             _ctx.on_changed()
             return 200, {"settings": _settings_dict()}
 
+<<<<<<< HEAD
         if method == "GET" and path == "/api/plugins":
             return 200, _plugins_list(scan_always=True)
 
@@ -192,6 +193,10 @@ def handle_request(
         if method == "POST" and path.startswith("/api/plugins/") and path.endswith("/run"):
             pid = path[len("/api/plugins/") : -len("/run")]
             return _run_plugin(pid, body)
+=======
+        if method == "POST" and path == "/api/reminders/check-conflicts":
+            return _check_reminder_conflicts(body)
+>>>>>>> origin/main
 
         if method == "GET" and path == "/api/current-task":
             t = _ctx.task_service.get_current_task()
@@ -266,6 +271,7 @@ def _settings_dict() -> dict:
     }
 
 
+<<<<<<< HEAD
 def _plugins_list(*, scan_always: bool = False) -> dict:
     """插件列表（含校验失败项）。scan_always 供设置页在未启用时也扫描展示。"""
     from zentray.resources import get_resource_path
@@ -500,6 +506,41 @@ def _run_plugin(plugin_id: str, body: dict) -> tuple[int, dict]:
     return 200, {"ok": True, "id": plugin_id, "started": True}
 
 
+=======
+def _check_reminder_conflicts(body: dict) -> tuple[int, dict]:
+    """检查候选弹窗提醒是否与已有任务/模板/AI 调度冲突。"""
+    from zentray.services.reminder_conflict import find_reminder_conflicts
+    from zentray.services.settings_manager import SettingsManager
+
+    reminder = body.get("reminder")
+    if not reminder or not isinstance(reminder, dict):
+        return 400, {"error": "reminder 必填"}
+    if not reminder.get("enabled"):
+        return 200, {"conflicts": [], "has_conflict": False}
+
+    sm = SettingsManager()
+    ai = sm.ai
+    ts = _ctx.task_service
+    conflicts = find_reminder_conflicts(
+        reminder,
+        tasks=ts.get_all_tasks() if ts else [],
+        templates=ts.get_all_templates() if ts else [],
+        exclude_task_id=body.get("exclude_task_id") or None,
+        exclude_template_id=body.get("exclude_template_id") or None,
+        plan_enabled=bool(ai.plan.enabled),
+        plan_hour=int(ai.plan.trigger_hour),
+        plan_minute=int(ai.plan.trigger_minute),
+        review_enabled=bool(ai.review.enabled),
+        review_hour=int(ai.review.trigger_hour),
+        review_minute=int(ai.review.trigger_minute),
+    )
+    return 200, {
+        "has_conflict": bool(conflicts),
+        "conflicts": conflicts,
+    }
+
+
+>>>>>>> origin/main
 def _save_settings(data: dict) -> None:
     """写回 settings.json，复用 SettingsManager 的字段结构。"""
     from zentray.services.settings_manager import SettingsManager
