@@ -42,7 +42,8 @@ usage() {
                        默认: linux
   --clean              清理 build/ 后重新 PyInstaller
   --install            (仅 linux) 构建后 sudo apt install 本机 deb
-  --skip-binary        跳过 PyInstaller（已有 dist/ZenTray 时快速重打包 deb）
+  --skip-binary        跳过 PyInstaller（仅当前端未变化时复用 dist/ZenTray 快速重打包；
+                       若 web/dist 已更新会自动强制重建，避免旧 UI 进包）
   -h, --help           显示帮助
 
 产物目录: dist/releases/
@@ -101,15 +102,64 @@ need_venv() {
 }
 
 # ========================================================================
+build_frontend() {
+    section "构建前端 (web/dist)"
+    if [[ ! -d "${PROJECT_DIR}/web" ]]; then
+        warn "无 web/ 目录，跳过前端构建"
+        return
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+        err "需要 npm 以构建 Vue 前端"
+        exit 1
+    fi
+    (
+        cd "${PROJECT_DIR}/web"
+        if [[ ! -d node_modules ]]; then
+            warn "安装前端依赖（npm install）..."
+            npm install
+        fi
+        npm run build
+    ) || {
+        err "前端构建失败（npm run build），中止打包。"
+        err "请检查 web/ 下源码报错；若 node_modules 过期可先删除后重试。"
+        exit 1
+    }
+    if [[ ! -d "${PROJECT_DIR}/web/dist" ]] || [[ ! -f "${PROJECT_DIR}/web/dist/index.html" ]]; then
+        err "前端构建失败：未生成 web/dist/index.html"
+        exit 1
+    fi
+    info "前端产物: ${PROJECT_DIR}/web/dist"
+}
+
+# ========================================================================
+# 判断现有 dist/ZenTray 是否内嵌了过期前端。
+# ZenTray 为 PyInstaller onefile 自包含产物，web/dist 在打包瞬间被固化进二进制；
+# 只要 web/dist 中任一文件比二进制新，就说明二进制仍是旧 UI，必须重建。
+# 返回 0 = 需重建；1 = 二进制已包含最新前端。
+frontend_is_newer_than_binary() {
+    [[ -f "$DIST_BIN" ]] || return 0
+    [[ -d "${PROJECT_DIR}/web/dist" ]] || return 0
+    find "${PROJECT_DIR}/web/dist" -type f -newer "$DIST_BIN" -print -quit | grep -q .
+}
+
+# ========================================================================
 build_pyinstaller() {
     need_venv
+    # 始终先构建前端，保证 web/dist 打入 PyInstaller datas
+    build_frontend
+
     section "PyInstaller 构建主程序"
     if $CLEAN; then
         rm -rf "${PROJECT_DIR}/build" "${PROJECT_DIR}/dist/ZenTray"
         warn "已清理 build/ 与 dist/ZenTray"
     fi
+    # --skip-binary 但现有二进制已过期（前端刚重新构建）→ 强制重建，杜绝旧 UI 进包
+    if $SKIP_PYINSTALLER && [[ -f "$DIST_BIN" ]] && frontend_is_newer_than_binary; then
+        warn "--skip-binary 但 web/dist 已更新，现有二进制仍是旧 UI，强制重新构建主程序"
+        SKIP_PYINSTALLER=false
+    fi
     if $SKIP_PYINSTALLER && [[ -f "$DIST_BIN" ]]; then
-        warn "跳过 PyInstaller，使用已有 $DIST_BIN"
+        warn "跳过 PyInstaller，使用已有 $DIST_BIN（前端未变化，二进制已含最新 UI）"
         return
     fi
     if ! "$VENV_PYTHON" -c "import PyInstaller" 2>/dev/null; then
@@ -151,10 +201,39 @@ build_linux_deb() {
         exit 1
     fi
 
-    local stage arch deb_name
+    local stage arch deb_name branch safe_branch pack_order
     arch="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
     stage="${PROJECT_DIR}/build/deb_stage"
-    deb_name="${PKG_NAME}_${VERSION}_${arch}.deb"
+
+    # 命名规范：
+    #   main/master → zentray_<VERSION>_<arch>.deb
+    #   功能分支   → zentray_<VERSION>_feature-<branch>-<N>_<arch>.deb
+    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+    if [[ "$branch" != "main" && "$branch" != "master" ]]; then
+        # feature/optimization → optimization；其它非 feature 前缀保留清洗后全名
+        safe_branch="${branch//\//-}"
+        safe_branch="${safe_branch//[^a-zA-Z0-9-]/-}"
+        safe_branch="$(echo "$safe_branch" | sed -E 's/-+/-/g; s/^-|-$//g')"
+        if [[ "$safe_branch" == feature-* ]]; then
+            safe_branch="${safe_branch#feature-}"
+        fi
+        pack_order="$(cat "${RELEASES_DIR}/.latest_branch_packings" 2>/dev/null || echo 0)"
+        # 仅统计当前分支的次序：用独立文件避免跨分支串号
+        local order_file="${RELEASES_DIR}/.pack_order_${safe_branch}"
+        if [[ -f "$order_file" ]]; then
+            pack_order="$(cat "$order_file" 2>/dev/null || echo 0)"
+        else
+            pack_order=0
+        fi
+        pack_order=$((pack_order + 1))
+        deb_name="${PKG_NAME}_${VERSION}_feature-${safe_branch}-${pack_order}_${arch}.deb"
+        echo "$pack_order" > "$order_file"
+        # 兼容旧计数器
+        echo "$pack_order" > "${RELEASES_DIR}/.latest_branch_packings"
+    else
+        deb_name="${PKG_NAME}_${VERSION}_${arch}.deb"
+    fi
+    info "包名: ${deb_name}"
     rm -rf "$stage"
     mkdir -p \
         "${stage}/DEBIAN" \
@@ -167,6 +246,14 @@ build_linux_deb() {
     # 主二进制
     cp -a "$DIST_BIN" "${stage}/opt/${PKG_NAME}/ZenTray"
     chmod 755 "${stage}/opt/${PKG_NAME}/ZenTray"
+
+    # 防线：二进制必须已包含最新前端，否则静默产出「旧 UI 的 deb」
+    if frontend_is_newer_than_binary; then
+        err "中止打包：$DIST_BIN 内嵌的 web/dist 已过期（前端构建晚于二进制）"
+        err "请重新构建主程序后再打 deb：./scripts/build_package.sh --target linux"
+        exit 1
+    fi
+    info "校验: $DIST_BIN 已包含最新前端（web/dist 无更新文件）"
 
     # 图标
     local icon_src="${PROJECT_DIR}/resources/icons/app_icon.png"

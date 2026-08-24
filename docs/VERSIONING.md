@@ -18,4 +18,22 @@
 
 ## 当前版本
 
-见 `zentray/config.py` → `VERSION`（现为 **0.1.0**）。
+见 `zentray/config.py` → `VERSION`（现为 **0.4.2**）。
+
+## 安装包命名规范
+
+产物目录：`dist/releases/`
+
+| 分支 | deb 命名 | 示例 |
+|------|----------|------|
+| `main` / `master` | `zentray_<VERSION>_<arch>.deb` | `zentray_0.4.2_amd64.deb` |
+| 功能分支 | `zentray_<VERSION>_feature-<branch>-<N>_<arch>.deb` | `zentray_0.4.2_feature-optimization-1_amd64.deb` |
+
+说明：
+- `<branch>`：当前 git 分支名，`/` 与非法字符清洗为 `-`，并去掉前缀 `feature-`
+- `<N>`：该分支本机打包次序（`dist/releases/.pack_order_<branch>` 自增）
+- 由 `scripts/build_package.sh` 自动生成，勿手改文件名后当正式包
+
+Windows / macOS：
+- `ZenTrayInstaller-<VERSION>-x64.exe`
+- `ZenTray-<VERSION>.dmg`
