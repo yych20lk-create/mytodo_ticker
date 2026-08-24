@@ -130,9 +130,10 @@ class QuickAddSettings:
 
 @dataclass
 class AppearanceSettings:
-    """界面外观。theme: light | dark | system"""
+    """系统/外观。theme: light | dark | system；autostart 为开机自启偏好。"""
 
     theme: str = "system"
+    autostart: bool = False
 
 
 @dataclass
@@ -389,6 +390,13 @@ class SettingsManager:
         else:
             n.enabled = n.any_enabled()
 
+    def reload(self) -> None:
+        """从磁盘重新加载 settings（导入备份后调用）。"""
+        self._settings = AppSettings()
+        self._load_from_env()
+        self._load_from_file()
+        self._loaded = True
+
     def _load_from_file(self) -> None:
         if not SETTINGS_FILE.exists():
             return
@@ -462,11 +470,15 @@ class SettingsManager:
                 default_priority=q.get("default_priority", "medium"),
             )
         if "appearance" in data:
-            a = data["appearance"]
+            a = data["appearance"] or {}
             theme = (a.get("theme") or "system").lower()
             if theme not in ("light", "dark", "system"):
                 theme = "system"
-            self._settings.appearance = AppearanceSettings(theme=theme)
+            autostart = bool(a.get("autostart", False))
+            self._settings.appearance = AppearanceSettings(
+                theme=theme,
+                autostart=autostart,
+            )
 
         # 用 review 回写 nightly 兼容
         self._sync_nightly_from_review()

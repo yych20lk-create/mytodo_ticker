@@ -118,6 +118,38 @@ export async function saveSettings(settings) {
   return data.settings
 }
 
+/** 系统页：自启状态 + 导出选项 */
+export async function getSystemStatus() {
+  const { data } = await http.get('/api/system/status')
+  return data
+}
+
+/** 即时开关开机自启 */
+export async function setAutostart(enabled) {
+  const { data } = await http.post('/api/system/autostart', { enabled: !!enabled })
+  return data
+}
+
+/** 导出备份 zip */
+export async function exportBackup(include) {
+  const { data } = await http.post('/api/system/export', { include })
+  return data
+}
+
+/** 从本机 zip 路径导入（替换） */
+export async function importBackup(path, { include, safety_backup = true } = {}) {
+  const body = { path, safety_backup }
+  if (include) body.include = include
+  const { data } = await http.post('/api/system/import', body)
+  return data
+}
+
+/** 仅打包 archive/ */
+export async function packArchive() {
+  const { data } = await http.post('/api/system/archive/pack')
+  return data
+}
+
 export async function getCurrentTask() {
   const { data } = await http.get('/api/current-task')
   return data.item

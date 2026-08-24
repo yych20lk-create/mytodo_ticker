@@ -200,6 +200,18 @@ def handle_request(
             name = unquote(path[len("/api/history/ai/") :])
             return _history_ai_content(name)
 
+        # —— 系统：自启 + 数据迁移 ——
+        if method == "GET" and path == "/api/system/status":
+            return _system_status()
+        if method == "POST" and path == "/api/system/autostart":
+            return _system_set_autostart(body or {})
+        if method == "POST" and path == "/api/system/export":
+            return _system_export(body or {})
+        if method == "POST" and path == "/api/system/import":
+            return _system_import(body or {})
+        if method == "POST" and path == "/api/system/archive/pack":
+            return _system_archive_pack()
+
         return 404, {"error": f"not found: {method} {path}"}
     except Exception as e:
         logger.exception("API error %s %s", method, path)
@@ -362,6 +374,95 @@ def _theme_payload() -> dict:
         "mode": mode,
         "effective": resolve_effective_theme(mode),
     }
+
+
+def _system_status() -> tuple[int, dict]:
+    from zentray.config import DATA_DIR, VERSION
+    from zentray.services import autostart as autostart_svc
+    from zentray.services import data_migration as mig
+    from zentray.services.settings_manager import SettingsManager
+
+    st = autostart_svc.status()
+    pref = bool(SettingsManager().appearance.autostart)
+    return 200, {
+        "version": VERSION,
+        "data_dir": str(DATA_DIR),
+        "autostart": {
+            **st,
+            "preference": pref,
+        },
+        "include_options": mig.list_include_options(),
+        "exports_dir": str(mig.exports_dir()),
+    }
+
+
+def _system_set_autostart(body: dict) -> tuple[int, dict]:
+    from zentray.services import autostart as autostart_svc
+    from zentray.services.settings_manager import SettingsManager
+
+    if "enabled" not in body:
+        return 400, {"error": "enabled 必填"}
+    enabled = bool(body.get("enabled"))
+    ok, message = autostart_svc.set_enabled(enabled)
+    if not ok:
+        return 500, {"ok": False, "error": message, "enabled": autostart_svc.is_enabled()}
+
+    sm = SettingsManager()
+    sm.appearance.autostart = enabled
+    sm.save()
+    return 200, {
+        "ok": True,
+        "message": message,
+        "enabled": autostart_svc.is_enabled(),
+        "preference": enabled,
+    }
+
+
+def _system_export(body: dict) -> tuple[int, dict]:
+    from zentray.services import data_migration as mig
+
+    include = body.get("include")
+    result = mig.create_export_zip(include)
+    code = 200 if result.ok else 500
+    return code, result.to_dict()
+
+
+def _system_import(body: dict) -> tuple[int, dict]:
+    from zentray.services import data_migration as mig
+    from zentray.services.settings_manager import SettingsManager
+
+    path = (body.get("path") or "").strip()
+    if not path:
+        return 400, {"error": "path 必填（本机 zip 绝对路径）"}
+    include = body.get("include")
+    make_safety = body.get("safety_backup", True)
+    if isinstance(make_safety, str):
+        make_safety = make_safety.lower() not in ("0", "false", "no")
+    result = mig.import_replace(
+        path,
+        include,
+        make_safety_backup=bool(make_safety),
+    )
+    if result.ok:
+        try:
+            SettingsManager().reload()
+        except Exception:
+            logger.exception("导入后 reload settings 失败")
+        try:
+            _ctx.apply_settings()
+            _ctx.on_changed()
+        except Exception:
+            logger.exception("导入后 apply_settings 失败")
+        return 200, result.to_dict()
+    return 400, result.to_dict()
+
+
+def _system_archive_pack() -> tuple[int, dict]:
+    from zentray.services import data_migration as mig
+
+    result = mig.pack_archive()
+    code = 200 if result.ok else 500
+    return code, result.to_dict()
 
 
 def _complete_setup(form: dict) -> None:
