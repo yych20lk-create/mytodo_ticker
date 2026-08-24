@@ -16,7 +16,7 @@
           <a-menu-item key="polling">任务轮播</a-menu-item>
           <a-menu-item key="pomodoro">番茄钟</a-menu-item>
           <a-menu-item key="categories">分类</a-menu-item>
-          <a-menu-item key="appearance">外观</a-menu-item>
+          <a-menu-item key="system">系统</a-menu-item>
         </a-menu>
 
         <div class="settings-body" :class="{ 'is-ai': mainKey === 'ai_hub' }">
@@ -381,17 +381,93 @@
             </div>
           </template>
 
-          <template v-else-if="mainKey === 'appearance'">
-            <a-form layout="vertical" style="max-width: 420px">
-              <a-form-item label="主题">
-                <a-radio-group v-model="form.appearance.theme" @change="onThemePreview">
-                  <a-radio value="system">跟随系统</a-radio>
-                  <a-radio value="light">浅色</a-radio>
-                  <a-radio value="dark">深色</a-radio>
-                </a-radio-group>
-              </a-form-item>
-              <a-alert type="info">预览立即生效；保存后同步应用。</a-alert>
-            </a-form>
+          <template v-else-if="mainKey === 'system'">
+            <div class="system-settings">
+              <a-card class="sys-card" :bordered="false" title="外观">
+                <a-form layout="vertical" style="max-width: 420px">
+                  <a-form-item label="主题">
+                    <a-radio-group v-model="form.appearance.theme" @change="onThemePreview">
+                      <a-radio value="system">跟随系统</a-radio>
+                      <a-radio value="light">浅色</a-radio>
+                      <a-radio value="dark">深色</a-radio>
+                    </a-radio-group>
+                  </a-form-item>
+                  <a-alert type="info">主题预览立即生效；点底部「保存设置」写入配置。</a-alert>
+                </a-form>
+              </a-card>
+
+              <a-card class="sys-card" :bordered="false" title="启动">
+                <div class="sys-row">
+                  <div>
+                    <div class="sys-title">开机自启</div>
+                    <div class="sys-desc">
+                      开启后登录系统时自动启动 ZenTray。开关立即生效，无需点保存。
+                    </div>
+                    <div v-if="autostartHint" class="sys-hint muted">{{ autostartHint }}</div>
+                  </div>
+                  <a-switch
+                    :model-value="autostartEnabled"
+                    :loading="autostartLoading"
+                    @change="onAutostartChange"
+                  />
+                </div>
+              </a-card>
+
+              <a-card class="sys-card" :bordered="false" title="数据迁移">
+                <p class="sys-desc" style="margin-bottom: 12px">
+                  导出任务、配置、历史与归档，便于跨设备迁移。导入为<strong>替换</strong>模式，导入前会自动生成本地安全备份。
+                </p>
+
+                <div class="sys-section-label">导出内容</div>
+                <a-checkbox-group v-model="exportInclude" direction="vertical" class="export-checks">
+                  <a-checkbox
+                    v-for="opt in includeOptions"
+                    :key="opt.key"
+                    :value="opt.key"
+                  >
+                    {{ opt.label }}
+                    <a-tag v-if="opt.sensitive" size="small" color="orangered" style="margin-left: 6px">
+                      含密钥
+                    </a-tag>
+                  </a-checkbox>
+                </a-checkbox-group>
+
+                <a-space style="margin-top: 12px" wrap>
+                  <a-button type="primary" :loading="exportLoading" @click="onExportBackup">
+                    导出备份
+                  </a-button>
+                  <a-button :loading="archivePackLoading" @click="onPackArchive">
+                    打包归档
+                  </a-button>
+                </a-space>
+                <p v-if="lastExportPath" class="sys-path">
+                  最近导出：<code>{{ lastExportPath }}</code>
+                </p>
+
+                <a-divider />
+
+                <div class="sys-section-label">导入备份（替换）</div>
+                <div class="sys-import-row">
+                  <a-input
+                    v-model="importPath"
+                    placeholder="本机 zip 绝对路径，例如 /home/you/.../zentray-backup-....zip"
+                    allow-clear
+                  />
+                  <a-button
+                    type="primary"
+                    status="warning"
+                    :loading="importLoading"
+                    @click="onImportBackup"
+                  >
+                    导入
+                  </a-button>
+                </div>
+                <a-alert type="warning" style="margin-top: 10px">
+                  导入将覆盖所选类别的本地数据；操作前会自动写入安全备份到 exports 目录。
+                </a-alert>
+                <p v-if="lastImportMsg" class="sys-path">{{ lastImportMsg }}</p>
+              </a-card>
+            </div>
           </template>
         </div>
       </div>
@@ -407,9 +483,18 @@
 
 <script setup>
 import { computed, inject, onMounted, reactive, ref } from 'vue'
-// NumberSpinner / JobEditor already imported below
-import { Message } from '@arco-design/web-vue'
-import { cancelHost, closeHost, getSettings, saveSettings } from '@/api/client'
+import { Message, Modal } from '@arco-design/web-vue'
+import {
+  cancelHost,
+  closeHost,
+  exportBackup,
+  getSettings,
+  getSystemStatus,
+  importBackup,
+  packArchive,
+  saveSettings,
+  setAutostart,
+} from '@/api/client'
 import { applyTheme } from '@/theme'
 import JobEditor from '@/components/JobEditor.vue'
 import NumberSpinner from '@/components/NumberSpinner.vue'
@@ -421,6 +506,19 @@ const mainKey = ref('ai_hub')
 const aiTab = ref('api')
 const apiExpandKeys = ref([])
 const notifyExpandKeys = ref([])
+
+// —— 系统页 ——
+const autostartEnabled = ref(false)
+const autostartLoading = ref(false)
+const autostartHint = ref('')
+const includeOptions = ref([])
+const exportInclude = ref([])
+const exportLoading = ref(false)
+const archivePackLoading = ref(false)
+const lastExportPath = ref('')
+const importPath = ref('')
+const importLoading = ref(false)
+const lastImportMsg = ref('')
 
 const form = reactive(emptyForm())
 
@@ -472,7 +570,7 @@ function emptyForm() {
       primary_list: [],
     },
     quick_add: { default_category: '工作', default_priority: 'medium' },
-    appearance: { theme: 'system' },
+    appearance: { theme: 'system', autostart: false },
   }
 }
 
@@ -607,6 +705,142 @@ function onThemePreview() {
   else applyTheme(mode)
 }
 
+async function loadSystemStatus() {
+  try {
+    const data = await getSystemStatus()
+    autostartEnabled.value = !!data?.autostart?.enabled
+    form.appearance.autostart = !!data?.autostart?.preference
+    const target = data?.autostart?.launch_target
+    autostartHint.value = target ? `启动目标：${target}` : ''
+    const opts = data?.include_options || []
+    includeOptions.value = opts
+    if (!exportInclude.value.length) {
+      exportInclude.value = opts.filter((o) => o.default).map((o) => o.key)
+    }
+  } catch (e) {
+    // 系统 API 不可用时不影响其它设置
+    autostartHint.value = e?.message || '无法读取系统状态'
+  }
+}
+
+async function onAutostartChange(val) {
+  autostartLoading.value = true
+  try {
+    const data = await setAutostart(!!val)
+    if (!data?.ok) {
+      Message.error(data?.error || '自启设置失败')
+      return
+    }
+    autostartEnabled.value = !!data.enabled
+    form.appearance.autostart = !!data.preference
+    Message.success(data.message || (val ? '已开启开机自启' : '已关闭开机自启'))
+  } catch (e) {
+    Message.error(e?.response?.data?.error || e?.message || '自启设置失败')
+  } finally {
+    autostartLoading.value = false
+    await loadSystemStatus()
+  }
+}
+
+async function onExportBackup() {
+  if (!exportInclude.value.length) {
+    Message.warning('请至少选择一项导出内容')
+    return
+  }
+  if (exportInclude.value.includes('env')) {
+    const ok = await new Promise((resolve) => {
+      Modal.confirm({
+        title: '包含密钥',
+        content: '导出内容包含 .env（API Key 等）。请妥善保管备份文件，确认继续？',
+        okText: '继续导出',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+    if (!ok) return
+  }
+  exportLoading.value = true
+  try {
+    const data = await exportBackup(exportInclude.value)
+    if (!data?.ok) {
+      Message.error(data?.message || '导出失败')
+      return
+    }
+    lastExportPath.value = data.path || ''
+    Message.success(`导出成功${data.path ? `：${data.path}` : ''}`)
+  } catch (e) {
+    Message.error(e?.response?.data?.message || e?.message || '导出失败')
+  } finally {
+    exportLoading.value = false
+  }
+}
+
+async function onPackArchive() {
+  archivePackLoading.value = true
+  try {
+    const data = await packArchive()
+    if (!data?.ok) {
+      Message.error(data?.message || '打包失败')
+      return
+    }
+    lastExportPath.value = data.path || ''
+    Message.success(`归档已打包${data.path ? `：${data.path}` : ''}`)
+  } catch (e) {
+    Message.error(e?.response?.data?.message || e?.message || '打包失败')
+  } finally {
+    archivePackLoading.value = false
+  }
+}
+
+async function onImportBackup() {
+  const path = (importPath.value || '').trim()
+  if (!path) {
+    Message.warning('请填写本机备份 zip 路径')
+    return
+  }
+  const ok = await new Promise((resolve) => {
+    Modal.confirm({
+      title: '确认导入（替换）',
+      content:
+        '将用备份覆盖本地对应数据，并先自动生成安全备份。导入后建议刷新任务或重启应用。是否继续？',
+      okText: '导入',
+      okButtonProps: { status: 'warning' },
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    })
+  })
+  if (!ok) return
+  importLoading.value = true
+  lastImportMsg.value = ''
+  try {
+    const data = await importBackup(path, {
+      include: exportInclude.value.length ? exportInclude.value : undefined,
+      safety_backup: true,
+    })
+    if (!data?.ok) {
+      Message.error(data?.message || data?.error || '导入失败')
+      lastImportMsg.value = data?.message || data?.error || ''
+      return
+    }
+    lastImportMsg.value = [
+      data.message,
+      data.safety_backup ? `安全备份：${data.safety_backup}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+    Message.success(data.message || '导入成功')
+    // 重新加载设置
+    const s = await getSettings()
+    normalizeLoaded(s)
+    onThemePreview()
+    await loadSystemStatus()
+  } catch (e) {
+    Message.error(e?.response?.data?.message || e?.response?.data?.error || e?.message || '导入失败')
+  } finally {
+    importLoading.value = false
+  }
+}
+
 function addApiProfile() {
   const id = uid()
   form.ai.api_profiles.push({
@@ -647,7 +881,8 @@ function normalizeLoaded(s) {
   }
   if (!form.notification) form.notification = emptyForm().notification
   ensureFixedChannels(form.notification)
-  if (!form.appearance) form.appearance = { theme: 'system' }
+  if (!form.appearance) form.appearance = { theme: 'system', autostart: false }
+  if (form.appearance.autostart == null) form.appearance.autostart = false
   if (!form.categories) form.categories = emptyForm().categories
   if (!Array.isArray(form.categories.primary_list)) form.categories.primary_list = []
   // 括号强制成对
@@ -708,6 +943,7 @@ onMounted(async () => {
     const s = await getSettings()
     normalizeLoaded(s)
     onThemePreview()
+    await loadSystemStatus()
   } catch (e) {
     Message.error(e?.message || '加载失败')
   } finally {
@@ -921,5 +1157,79 @@ onMounted(async () => {
     position: static;
     max-height: none;
   }
+}
+
+/* 系统页 */
+.system-settings {
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.sys-card :deep(.arco-card-body) {
+  padding-top: 12px;
+}
+.sys-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.sys-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.sys-desc {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--color-text-3);
+  line-height: 1.5;
+}
+.sys-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  word-break: break-all;
+}
+.sys-section-label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.export-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 8px;
+  align-items: flex-start;
+}
+
+/* 让每个选项占最小宽度，避免过长 */
+.export-checks .arco-checkbox-wrapper {
+  flex: 0 0 auto;
+  min-width: 140px;
+}
+
+/* 标签在右侧 */
+.export-checks .arco-tag {
+  margin-left: auto;
+}
+.sys-import-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.sys-import-row .arco-input-wrapper {
+  flex: 1;
+}
+.sys-path {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--color-text-3);
+  word-break: break-all;
+}
+.muted {
+  color: var(--color-text-3);
 }
 </style>
