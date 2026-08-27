@@ -252,13 +252,15 @@ def main():
         logger.exception("Vue API 初始化失败，将使用原生对话框")
 
     def _on_activate_existing():
-        """再次点击桌面图标：不弹窗，仅刷新顶栏轮播。"""
+        """再次点击桌面图标：唤醒顶栏显示并打开任务列表界面。"""
         try:
             if runtime.controller:
-                # 确保轮播定时器在跑，并立刻刷新顶栏标题
                 runtime.controller.start_rotation()
                 runtime.controller.update_display(update_menu=True)
-                logger.info("二次点击：已刷新顶栏显示（无弹窗）")
+                from zentray.ui.commands import TaskListCommand
+
+                TaskListCommand().execute(runtime.controller)
+                logger.info("二次点击：已唤醒前台并打开任务列表界面")
         except Exception:
             logger.exception("激活已有实例时出错")
 
