@@ -1,51 +1,83 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h2>📋 任务列表</h2>
+      <h2>任务列表</h2>
       <a-space>
-        <a-button type="primary" @click="$router.push({ path: '/tasks/new', query: { from: 'list' } })">新建</a-button>
-        <a-button @click="$router.push({ path: '/periodic', query: { from: 'list' } })">🔁 周期任务</a-button>
-        <a-button @click="cancelHost">关闭</a-button>
+        <a-button type="primary" @click="$router.push({ path: '/tasks/new', query: { from: 'list' } })">
+          <template #icon><PhPlus :size="16" /></template>
+          新建
+        </a-button>
+        <a-button @click="$router.push({ path: '/periodic', query: { from: 'list' } })">
+          <template #icon><PhRepeat :size="16" /></template>
+          周期任务
+        </a-button>
+        <a-button type="secondary" @click="cancelHost" aria-label="关闭窗口">
+          <template #icon><PhX :size="16" /></template>
+          关闭
+        </a-button>
       </a-space>
     </div>
 
     <div class="two-col">
       <a-card title="活跃任务" :bordered="true">
         <a-spin :loading="loading" style="width: 100%">
-          <a-list :data="tasks" :bordered="false">
-            <template #item="{ item }">
-              <a-list-item
-                class="task-item"
-                :class="{ active: item.id === selectedId }"
-                @click="selectedId = item.id"
-              >
-                <a-list-item-meta
-                  :title="item.title"
-                  :description="`${item.priority} · ${item.progress || 0}% · ${item.category || ''}`"
-                />
-              </a-list-item>
-            </template>
-          </a-list>
-          <a-empty v-if="!loading && !tasks.length" description="暂无活跃任务" />
+          <div v-if="tasks.length" class="task-card-list">
+            <div
+              v-for="item in tasks"
+              :key="item.id"
+              class="task-card-item"
+              :class="{ active: item.id === selectedId }"
+              @click="selectedId = item.id"
+            >
+              <div class="task-card-main">
+                <span class="task-card-title">{{ item.title }}</span>
+                <div class="task-card-meta">
+                  <a-tag size="small" color="arcoblue" v-if="item.category">{{ item.category }}</a-tag>
+                  <span class="task-card-sub">优先级: {{ item.priority }} · 进度: {{ item.progress || 0 }}%</span>
+                </div>
+              </div>
+              <PhCheckCircle
+                v-if="item.progress === 100"
+                class="icon-check-animated"
+                :size="22"
+                weight="fill"
+              />
+            </div>
+          </div>
+          <a-empty v-else-if="!loading" description="暂无活跃任务" />
         </a-spin>
       </a-card>
 
-      <a-card title="操作" :bordered="true">
+      <a-card title="任务详情与操作" :bordered="true">
         <template v-if="current">
           <p class="title">{{ current.title }}</p>
           <p class="meta">
-            分类: {{ current.category }}　优先级: {{ current.priority }}　进度:
-            {{ current.progress || 0 }}%
+            分类: {{ current.category }}　优先级: {{ current.priority }}　进度: {{ current.progress || 0 }}%
             <br v-if="current.deadline" />
             <span v-if="current.deadline">截止: {{ current.deadline }}</span>
           </p>
           <a-space direction="vertical" fill style="width: 100%">
-            <a-button long type="outline" @click="onSelect">🔄 切换到此任务</a-button>
-            <a-button long type="outline" @click="goProgress">📊 更新进度</a-button>
-            <a-button long type="outline" @click="goEdit">📝 编辑查看</a-button>
-            <a-space>
-              <a-button type="primary" status="success" @click="onDone">✅ 完成</a-button>
-              <a-button status="danger" @click="onAbandon">❌ 废弃</a-button>
+            <a-button long type="outline" @click="onSelect">
+              <template #icon><PhArrowsCounterClockwise :size="16" /></template>
+              切换到此任务
+            </a-button>
+            <a-button long type="outline" @click="goProgress">
+              <template #icon><PhPencil :size="16" /></template>
+              更新进度
+            </a-button>
+            <a-button long type="outline" @click="goEdit">
+              <template #icon><PhPencil :size="16" /></template>
+              编辑查看
+            </a-button>
+            <a-space fill style="width: 100%">
+              <a-button type="primary" status="success" style="flex: 1" @click="onDone">
+                <template #icon><PhCheck :size="16" /></template>
+                完成
+              </a-button>
+              <a-button status="danger" style="flex: 1" @click="onAbandon">
+                <template #icon><PhTrash :size="16" /></template>
+                废弃
+              </a-button>
             </a-space>
           </a-space>
         </template>
@@ -59,6 +91,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Message, Modal } from '@arco-design/web-vue'
+import { PhPlus, PhRepeat, PhX, PhArrowsCounterClockwise, PhPencil, PhCheck, PhTrash, PhCheckCircle } from '@phosphor-icons/vue'
 import {
   abandonTask,
   cancelHost,
@@ -137,20 +170,39 @@ onMounted(reload)
 </script>
 
 <style scoped>
-.task-item {
-  cursor: pointer;
-  border-radius: 8px;
-  padding: 4px 8px;
+.task-card-list {
+  display: flex;
+  flex-direction: column;
 }
-.task-item.active {
-  background: var(--color-primary-light-1, #e8f3ff);
+.task-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.task-card-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.task-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.task-card-sub {
+  font-size: 12px;
+  color: var(--color-text-muted, #94a3b8);
+}
+.task-card-item.active {
+  border-color: var(--color-primary, #0d9488);
+  background: var(--color-surface-hover, rgba(20, 184, 166, 0.08));
 }
 .title {
   font-weight: 600;
+  font-size: 16px;
   margin: 0 0 8px;
 }
 .meta {
-  color: var(--color-text-3);
+  color: var(--color-text-muted, #94a3b8);
   font-size: 13px;
   margin: 0 0 16px;
 }
