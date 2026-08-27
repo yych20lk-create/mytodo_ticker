@@ -30,12 +30,27 @@ except Exception:
 if _HAS_WEBENGINE:
 
     class _BridgePage(QWebEnginePage):
-        """拦截 zentray:// 协议，用于前端关闭窗口并回传结果。"""
+        """拦截 zentray:// 协议，用于前端关闭窗口及平滑拖拽移动。"""
 
         result_received = Signal(object)
 
         def acceptNavigationRequest(self, url, nav_type, is_main_frame):  # noqa: N802
             s = url.toString()
+            if s.startswith("zentray://move"):
+                from urllib.parse import parse_qs, urlparse
+
+                q = parse_qs(urlparse(s).query)
+                try:
+                    dx = int((q.get("dx") or ["0"])[0])
+                    dy = int((q.get("dy") or ["0"])[0])
+                    view = self.view()
+                    if view:
+                        dlg = view.window()
+                        if dlg:
+                            dlg.move(dlg.x() + dx, dlg.y() + dy)
+                except Exception as e:
+                    logger.debug("Failed to handle zentray://move: %s", e)
+                return False
             if s.startswith("zentray://close"):
                 payload = {}
                 if "payload=" in s:

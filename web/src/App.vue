@@ -21,7 +21,41 @@ provide('setThemeMode', (mode) => {
 
 let unwatch = () => {}
 
+// 窗口无边框全域拖拽桥接支持
+let isDragging = false
+let startScreenX = 0
+let startScreenY = 0
+
+function handleMouseDown(e) {
+  // 忽略按钮、输入框、可编辑控件及交互组件
+  if (e.target && e.target.closest('button, input, textarea, a, .arco-btn, .arco-input-wrapper, .arco-select, .arco-picker, .arco-checkbox, .arco-radio')) {
+    return
+  }
+  isDragging = true
+  startScreenX = e.screenX
+  startScreenY = e.screenY
+}
+
+function handleMouseMove(e) {
+  if (!isDragging) return
+  const dx = e.screenX - startScreenX
+  const dy = e.screenY - startScreenY
+  if (dx !== 0 || dy !== 0) {
+    startScreenX = e.screenX
+    startScreenY = e.screenY
+    window.location.href = `zentray://move?dx=${dx}&dy=${dy}`
+  }
+}
+
+function handleMouseUp() {
+  isDragging = false
+}
+
 onMounted(async () => {
+  window.addEventListener('mousedown', handleMouseDown)
+  window.addEventListener('mousemove', handleMouseMove)
+  window.addEventListener('mouseup', handleMouseUp)
+
   try {
     const s = await getSettings()
     themeMode.value = s?.appearance?.theme || 'system'
@@ -37,5 +71,10 @@ onMounted(async () => {
   )
 })
 
-onUnmounted(() => unwatch && unwatch())
+onUnmounted(() => {
+  window.removeEventListener('mousedown', handleMouseDown)
+  window.removeEventListener('mousemove', handleMouseMove)
+  window.removeEventListener('mouseup', handleMouseUp)
+  if (unwatch) unwatch()
+})
 </script>

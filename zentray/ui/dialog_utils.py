@@ -27,15 +27,24 @@ class DialogDragFilter(QObject):
     def install_recursive(self, target: QObject) -> None:
         if not target:
             return
-        target.installEventFilter(self)
-        for child in target.findChildren(QObject):
-            child.installEventFilter(self)
+        try:
+            target.installEventFilter(self)
+            for child in target.findChildren(QObject):
+                child.installEventFilter(self)
+        except Exception:
+            pass
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if event.type() == QEvent.ChildAdded:
+        if event.type() == QEvent.Show:
+            center_dialog(self.dialog)
+            self.install_recursive(self.dialog)
+        elif event.type() == QEvent.ChildAdded:
             child = event.child()
             if child:
-                child.installEventFilter(self)
+                try:
+                    child.installEventFilter(self)
+                except Exception:
+                    pass
         elif event.type() == QEvent.MouseButtonPress:
             if event.button() == Qt.LeftButton:
                 self.drag_pos = event.globalPosition().toPoint() - self.dialog.frameGeometry().topLeft()
@@ -50,18 +59,24 @@ class DialogDragFilter(QObject):
 
 def available_screen_size() -> QSize:
     app = QApplication.instance()
-    if app and app.primaryScreen():
-        g = app.primaryScreen().availableGeometry()
-        return QSize(g.width(), g.height())
+    if app:
+        from PySide6.QtGui import QCursor
+
+        screen = app.screenAt(QCursor.pos()) or app.primaryScreen()
+        if screen:
+            g = screen.availableGeometry()
+            return QSize(g.width(), g.height())
     return QSize(1280, 720)
 
 
 def center_dialog(dialog: QDialog) -> None:
-    """将对话框精准居中到主屏幕可用区域中心。"""
+    """将对话框精准居中到当前活跃屏幕可用区域中心。"""
     app = QApplication.instance()
     if not app:
         return
-    screen = app.primaryScreen()
+    from PySide6.QtGui import QCursor
+
+    screen = app.screenAt(QCursor.pos()) or app.primaryScreen()
     if not screen:
         return
     geo = screen.availableGeometry()
