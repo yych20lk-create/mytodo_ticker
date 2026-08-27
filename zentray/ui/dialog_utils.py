@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 
 class DialogDragFilter(QObject):
-    """通用弹窗拖拽过滤器（支持 Qt 原生控件与 QWebEngineView 网页区域拖拽）。"""
+    """通用弹窗拖拽过滤器（支持 Wayland / X11 / Windows 原生系统级拖拽与物理拖拽）。"""
 
     def __init__(self, dialog: QDialog):
         super().__init__(dialog)
@@ -30,6 +30,10 @@ class DialogDragFilter(QObject):
         try:
             target.installEventFilter(self)
             for child in target.findChildren(QObject):
+                # 避开编辑框和按钮，防止抢占输入事件
+                classname = child.metaObject().className()
+                if any(k in classname for k in ["QLineEdit", "QTextEdit", "QPushButton", "QComboBox", "QSpinBox"]):
+                    continue
                 child.installEventFilter(self)
         except Exception:
             pass
@@ -38,7 +42,9 @@ class DialogDragFilter(QObject):
         if event.type() == QEvent.Show:
             from PySide6.QtCore import QTimer
 
-            QTimer.singleShot(10, lambda: center_dialog(self.dialog))
+            QTimer.singleShot(0, lambda: center_dialog(self.dialog))
+            QTimer.singleShot(30, lambda: center_dialog(self.dialog))
+            QTimer.singleShot(100, lambda: center_dialog(self.dialog))
             self.install_recursive(self.dialog)
         elif event.type() == QEvent.ChildAdded:
             child = event.child()
@@ -49,6 +55,13 @@ class DialogDragFilter(QObject):
                     pass
         elif event.type() == QEvent.MouseButtonPress:
             if event.button() == Qt.LeftButton:
+                handle = self.dialog.windowHandle()
+                if handle:
+                    try:
+                        if handle.startSystemMove():
+                            return True
+                    except Exception:
+                        pass
                 self.drag_pos = event.globalPosition().toPoint() - self.dialog.frameGeometry().topLeft()
         elif event.type() == QEvent.MouseMove:
             if event.buttons() == Qt.LeftButton and self.drag_pos is not None:
@@ -91,6 +104,7 @@ def center_dialog(dialog: QDialog) -> None:
 
 def enable_dialog_drag(dialog: QDialog) -> None:
     """为无边框弹窗启用递归鼠标拖拽支持。"""
+    dialog.create()
     drag_filter = DialogDragFilter(dialog)
     drag_filter.install_recursive(dialog)
     setattr(dialog, "_drag_filter", drag_filter)
@@ -122,7 +136,9 @@ def apply_dialog_chrome(
     enable_dialog_drag(dialog)
     from PySide6.QtCore import QTimer
 
-    QTimer.singleShot(10, lambda: center_dialog(dialog))
+    QTimer.singleShot(0, lambda: center_dialog(dialog))
+    QTimer.singleShot(30, lambda: center_dialog(dialog))
+    QTimer.singleShot(100, lambda: center_dialog(dialog))
 
 
 def fit_dialog(

@@ -28,12 +28,14 @@ let startScreenY = 0
 
 function handleMouseDown(e) {
   // 忽略按钮、输入框、可编辑控件及交互组件
-  if (e.target && e.target.closest('button, input, textarea, a, .arco-btn, .arco-input-wrapper, .arco-select, .arco-picker, .arco-checkbox, .arco-radio')) {
+  if (e.target && e.target.closest('button, input, textarea, a, .arco-btn, .arco-input-wrapper, .arco-select, .arco-picker, .arco-checkbox, .arco-radio, .arco-dropdown, .arco-modal')) {
     return
   }
   isDragging = true
   startScreenX = e.screenX
   startScreenY = e.screenY
+  // 优先通知 Python 触发 OS 原生 Wayland/X11 窗口拖拽
+  window.location.href = 'zentray://start_drag'
 }
 
 function handleMouseMove(e) {

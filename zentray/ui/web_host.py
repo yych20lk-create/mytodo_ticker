@@ -36,6 +36,17 @@ if _HAS_WEBENGINE:
 
         def acceptNavigationRequest(self, url, nav_type, is_main_frame):  # noqa: N802
             s = url.toString()
+            if s.startswith("zentray://start_drag"):
+                view = self.view()
+                if view:
+                    dlg = view.window()
+                    if dlg and dlg.windowHandle():
+                        try:
+                            if dlg.windowHandle().startSystemMove():
+                                return False
+                        except Exception as e:
+                            logger.debug("Failed startSystemMove from Vue: %s", e)
+                return False
             if s.startswith("zentray://move"):
                 from urllib.parse import parse_qs, urlparse
 
