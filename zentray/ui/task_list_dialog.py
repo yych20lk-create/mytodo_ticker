@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from zentray.ui.dialog_utils import center_dialog, fit_dialog, style_action_button
+from zentray.ui.dialog_utils import apply_dialog_chrome, style_action_button
 
 
 class TaskListDialog(QDialog):
@@ -28,7 +28,7 @@ class TaskListDialog(QDialog):
         self.task_service = task_service
         self.selected_action = None  # (action, task_id) or None
         self.setWindowTitle("任务列表")
-        fit_dialog(self, preferred_w=720, preferred_h=420, min_w=560, min_h=320)
+        apply_dialog_chrome(self, width=720, height=420)
 
         self._list_collapsed = False
         self._tasks = []
@@ -114,7 +114,6 @@ class TaskListDialog(QDialog):
 
         self._set_actions_enabled(False)
         self._reload()
-        center_dialog(self)
 
     def _toggle_list(self):
         self._list_collapsed = not self._list_collapsed

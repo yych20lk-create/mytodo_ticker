@@ -2,7 +2,7 @@
 """对话框通用布局：横版优先、适配屏幕、按钮文字完整显示。"""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QObject, QEvent
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -16,6 +16,38 @@ from PySide6.QtWidgets import (
 )
 
 
+class DialogDragFilter(QObject):
+    """通用弹窗拖拽过滤器（支持 Qt 原生控件与 QWebEngineView 网页区域拖拽）。"""
+
+    def __init__(self, dialog: QDialog):
+        super().__init__(dialog)
+        self.dialog = dialog
+        self.drag_pos = None
+
+    def install_recursive(self, target: QObject) -> None:
+        if not target:
+            return
+        target.installEventFilter(self)
+        for child in target.findChildren(QObject):
+            child.installEventFilter(self)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.ChildAdded:
+            child = event.child()
+            if child:
+                child.installEventFilter(self)
+        elif event.type() == QEvent.MouseButtonPress:
+            if event.button() == Qt.LeftButton:
+                self.drag_pos = event.globalPosition().toPoint() - self.dialog.frameGeometry().topLeft()
+        elif event.type() == QEvent.MouseMove:
+            if event.buttons() == Qt.LeftButton and self.drag_pos is not None:
+                self.dialog.move(event.globalPosition().toPoint() - self.drag_pos)
+                return True
+        elif event.type() == QEvent.MouseButtonRelease:
+            self.drag_pos = None
+        return False
+
+
 def available_screen_size() -> QSize:
     app = QApplication.instance()
     if app and app.primaryScreen():
@@ -25,17 +57,53 @@ def available_screen_size() -> QSize:
 
 
 def center_dialog(dialog: QDialog) -> None:
-    """将对话框居中到主屏幕可用区域。"""
+    """将对话框精准居中到主屏幕可用区域中心。"""
     app = QApplication.instance()
     if not app:
         return
     screen = app.primaryScreen()
     if not screen:
         return
-    cg = dialog.frameGeometry()
-    cp = screen.availableGeometry().center()
-    cg.moveCenter(cp)
-    dialog.move(cg.topLeft())
+    geo = screen.availableGeometry()
+    w = dialog.width()
+    h = dialog.height()
+    x = geo.x() + (geo.width() - w) // 2
+    y = geo.y() + (geo.height() - h) // 2
+    dialog.move(x, y)
+
+
+def enable_dialog_drag(dialog: QDialog) -> None:
+    """为无边框弹窗启用递归鼠标拖拽支持。"""
+    drag_filter = DialogDragFilter(dialog)
+    drag_filter.install_recursive(dialog)
+    setattr(dialog, "_drag_filter", drag_filter)
+
+
+def apply_dialog_chrome(
+    dialog: QDialog,
+    *,
+    width: int,
+    height: int,
+) -> None:
+    """
+    统一弹窗 Chrome 形态: 使用 FramelessWindowHint 彻底移除系统标题栏与系统按钮 (最大化/最小化/关闭)。
+    控制页面关闭和大小改由页面内部按钮控制。
+    """
+    stays_on_top = bool(dialog.windowFlags() & Qt.WindowStaysOnTopHint)
+    flags = Qt.FramelessWindowHint | Qt.Dialog
+    if stays_on_top:
+        flags |= Qt.WindowStaysOnTopHint
+    dialog.setWindowFlags(flags)
+
+    scr = available_screen_size()
+    max_w = max(320, int(scr.width() * 0.92))
+    max_h = max(240, int(scr.height() * 0.92))
+    fixed_w = min(width, max_w)
+    fixed_h = min(height, max_h)
+
+    dialog.setFixedSize(fixed_w, fixed_h)
+    enable_dialog_drag(dialog)
+    center_dialog(dialog)
 
 
 def fit_dialog(

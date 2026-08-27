@@ -314,22 +314,39 @@ class ExtensionCommand(ActionCommand):
                 break
 
 
+class CurrentTaskCommand(ActionCommand):
+    """当前任务：打开当前轮播任务的操作页/对话框"""
+
+    def execute(self, controller: "TrayController") -> None:
+        task = controller.task_service.get_current_task()
+        if not task:
+            return
+        from zentray.ui.vue_commands import try_vue_task_action
+
+        if try_vue_task_action(controller, task):
+            return
+        from zentray.ui.dialogs import TaskActionDialog
+
+        dialog = TaskActionDialog(task=task)
+        if dialog.exec():
+            action = dialog.get_selected_action()
+            if action:
+                _dispatch_task_action(action, task, controller)
+
+
 # ==========================================
 # 命令注册与路由
 # ==========================================
 
 # 静态命令映射
 COMMAND_MAP = {
-    "new": NewTaskCommand(),
+    "current_task": CurrentTaskCommand(),
     "done": DoneCommand(),
     "abandon": AbandonCommand(),
-    "progress": ProgressCommand(),
-    "edit": EditCommand(),
     "task_list": TaskListCommand(),
     "pomodoro": PomodoroStartCommand(),
     "stop_pomodoro": PomodoroStopCommand(),
     "extend_pomodoro": PomodoroExtendCommand(),
-    "periodic_manage": PeriodicManageCommand(),
     "ai_review_now": AiReviewNowCommand(),
     "history": HistoryCommand(),
     "quit": QuitCommand(),

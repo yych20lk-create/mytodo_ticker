@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, QTime, QDate
 from zentray.core.models import Task, PeriodicTemplate
 from zentray.core.reminder import ReminderSlot, TaskReminder
 from zentray.ui.dialog_utils import (
+    apply_dialog_chrome,
     center_dialog as _center_dialog,
     fit_dialog,
     style_action_button,
@@ -86,8 +87,7 @@ class TaskDialog(QDialog):
         self.attachments = list(task.attachments) if isinstance(task, Task) else []
 
         self.setWindowTitle("修改任务" if self.is_editing else "新建任务")
-        # 横版：宽屏双栏，避免竖向超屏
-        fit_dialog(self, preferred_w=820, preferred_h=480, min_w=640, min_h=360)
+        apply_dialog_chrome(self, width=820, height=480)
 
         from zentray.services.settings_manager import SettingsManager
 
@@ -701,7 +701,7 @@ class ProgressDialog(QDialog):
         title = (task.title if task else "") or ""
         short = title if len(title) <= 28 else title[:25] + "…"
         self.setWindowTitle(f"更新进度 · {short}" if short else "更新进度")
-        fit_dialog(self, preferred_w=720, preferred_h=380, min_w=560, min_h=300)
+        apply_dialog_chrome(self, width=720, height=380)
         self.init_ui()
         _center_dialog(self)
 
@@ -814,7 +814,7 @@ class TaskActionDialog(QDialog):
         self.task = task
         self.selected_action = None
         self.setWindowTitle("选择操作")
-        fit_dialog(self, preferred_w=520, preferred_h=240, min_w=420, min_h=200)
+        apply_dialog_chrome(self, width=520, height=240)
         self.init_ui()
         _center_dialog(self)
 

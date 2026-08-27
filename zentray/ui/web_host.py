@@ -82,24 +82,42 @@ class VueDialog(QDialog):
         self.result_payload: Any = None
         self.setModal(modal)
 
-        flags = self.windowFlags() & ~Qt.WindowContextHelpButtonHint
+        flags = (
+            self.windowFlags()
+            & ~Qt.WindowContextHelpButtonHint
+            & ~Qt.WindowCloseButtonHint
+            & ~Qt.WindowMinimizeButtonHint
+            & ~Qt.WindowMaximizeButtonHint
+            & ~Qt.WindowSystemMenuHint
+        )
         if frameless:
             flags = (
                 Qt.FramelessWindowHint
                 | Qt.Tool
                 | (Qt.WindowStaysOnTopHint if stay_on_top else Qt.Widget)
             )
-        elif stay_on_top:
-            flags |= Qt.WindowStaysOnTopHint
+        else:
+            flags = (
+                Qt.FramelessWindowHint
+                | Qt.Dialog
+                | (Qt.WindowStaysOnTopHint if stay_on_top else Qt.Widget)
+            )
         self.setWindowFlags(flags)
 
         if transparent:
             self.setAttribute(Qt.WA_TranslucentBackground, True)
 
-        from zentray.ui.dialog_utils import fit_dialog, center_dialog
+        from zentray.ui.dialog_utils import available_screen_size, center_dialog, enable_dialog_drag
+
+        enable_dialog_drag(self)
 
         if not frameless:
-            fit_dialog(self, preferred_w=width, preferred_h=height, min_w=min(480, width), min_h=min(200, height))
+            scr = available_screen_size()
+            max_w = max(320, int(scr.width() * 0.92))
+            max_h = max(240, int(scr.height() * 0.92))
+            fixed_w = min(width, max_w)
+            fixed_h = min(height, max_h)
+            self.setFixedSize(fixed_w, fixed_h)
         else:
             self.setFixedSize(width, height)
 
@@ -163,17 +181,13 @@ class VueDialog(QDialog):
         self.view.load(QUrl(url))
         layout.addWidget(self.view)
         center_dialog(self)
-        if frameless:
-            # 垂直略偏上，对齐原 QuickAdd 体验
-            from PySide6.QtWidgets import QApplication
-
-            app = QApplication.instance()
-            if app and app.primaryScreen():
-                geo = app.primaryScreen().availableGeometry()
-                x = geo.x() + (geo.width() - width) // 2
-                y = geo.y() + (geo.height() - height) // 2 - 120
-                self.move(x, y)
         logger.info("Vue dialog open: %s", url)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        from zentray.ui.dialog_utils import center_dialog
+
+        center_dialog(self)
 
     def _on_bridge_result(self, payload: object) -> None:
         self.result_payload = payload

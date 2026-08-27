@@ -43,7 +43,7 @@
     </div>
 
     <div class="page-footer">
-      <a-button @click="cancelHost">取消</a-button>
+      <a-button @click="onCancel">取消</a-button>
       <a-button type="primary" :loading="saving" @click="onSave">💾 保存</a-button>
     </div>
   </div>
@@ -51,7 +51,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Message, Modal } from '@arco-design/web-vue'
 import {
   abandonTask,
@@ -64,6 +64,23 @@ import {
 
 const props = defineProps({ id: String })
 const route = useRoute()
+const router = useRouter()
+
+function handleExit(payload = {}) {
+  if (route.query.from === 'list') {
+    router.push('/tasks')
+  } else {
+    closeHost(payload)
+  }
+}
+
+function onCancel() {
+  if (route.query.from === 'list') {
+    router.push('/tasks')
+  } else {
+    cancelHost()
+  }
+}
 const taskId = computed(() => props.id || route.params.id)
 
 const loading = ref(false)
@@ -90,7 +107,7 @@ async function onSave() {
   try {
     await updateProgress(taskId.value, snap10(percent.value), note.value)
     Message.success('已保存')
-    closeHost({ action: 'progress', percent: snap10(percent.value) })
+    handleExit({ action: 'progress', percent: snap10(percent.value) })
   } catch (e) {
     Message.error(e?.message || '保存失败')
   } finally {
@@ -101,7 +118,7 @@ async function onSave() {
 async function onDone() {
   await markDone(taskId.value)
   Message.success('已完成')
-  closeHost({ action: 'done' })
+  handleExit({ action: 'done' })
 }
 
 function onAbandon() {
@@ -110,7 +127,7 @@ function onAbandon() {
     content: '确定废弃此任务？',
     onOk: async () => {
       await abandonTask(taskId.value)
-      closeHost({ action: 'abandon' })
+      handleExit({ action: 'abandon' })
     },
   })
 }

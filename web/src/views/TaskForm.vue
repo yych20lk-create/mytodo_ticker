@@ -176,7 +176,7 @@
     </div>
 
     <div class="page-footer">
-      <a-button @click="cancelHost">取消</a-button>
+      <a-button @click="onCancel">取消</a-button>
       <a-button type="primary" :loading="saving" @click="onSave">💾 保存任务</a-button>
     </div>
 
@@ -196,7 +196,7 @@
 
 <script setup>
 import { computed, h, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Message, Modal } from '@arco-design/web-vue'
 import {
   addSecondaryCategory,
@@ -216,9 +216,26 @@ import TimeSpinner from '@/components/TimeSpinner.vue'
 
 const props = defineProps({ id: String })
 const route = useRoute()
+const router = useRouter()
 const taskId = computed(() => props.id || route.params.id)
 const isEdit = computed(() => Boolean(taskId.value))
 const isTemplate = ref(false)
+
+function handleExit(payload = { action: 'saved' }) {
+  if (route.query.from === 'list') {
+    router.push('/tasks')
+  } else {
+    closeHost(payload)
+  }
+}
+
+function onCancel() {
+  if (route.query.from === 'list') {
+    router.push('/tasks')
+  } else {
+    cancelHost()
+  }
+}
 
 const loading = ref(false)
 const saving = ref(false)
@@ -513,7 +530,7 @@ async function onSave() {
       await createTask(payload)
     }
     Message.success('已保存')
-    closeHost({ action: 'saved' })
+    handleExit({ action: 'saved' })
   } catch (e) {
     Message.error(e?.message || '保存失败')
   } finally {

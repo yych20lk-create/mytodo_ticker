@@ -4,7 +4,7 @@
       <h2>🔁 周期任务管理</h2>
       <a-space>
         <a-button type="primary" @click="onNew">➕ 新建周期任务</a-button>
-        <a-button @click="cancelHost">关闭</a-button>
+        <a-button @click="onClose">关闭</a-button>
       </a-space>
     </div>
 
@@ -34,10 +34,11 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Message, Modal } from '@arco-design/web-vue'
 import { cancelHost, deleteTemplate, listTemplates } from '@/api/client'
 
+const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const items = ref([])
@@ -64,12 +65,24 @@ async function reload() {
   }
 }
 
+function onClose() {
+  if (route.query.from === 'list') {
+    router.push('/tasks')
+  } else {
+    cancelHost()
+  }
+}
+
 function onNew() {
-  router.push({ path: '/tasks/new', query: { mode: 'periodic' } })
+  const query = { mode: 'periodic' }
+  if (route.query.from === 'list') query.from = 'list'
+  router.push({ path: '/tasks/new', query })
 }
 
 function onEdit(record) {
-  router.push({ path: `/tasks/${record.template_id}/edit`, query: { template: '1' } })
+  const query = { template: '1' }
+  if (route.query.from === 'list') query.from = 'list'
+  router.push({ path: `/tasks/${record.template_id}/edit`, query })
 }
 
 function onDelete(record) {

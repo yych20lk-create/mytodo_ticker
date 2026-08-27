@@ -3,7 +3,8 @@
     <div class="page-header">
       <h2>📋 任务列表</h2>
       <a-space>
-        <a-button type="primary" @click="$router.push('/tasks/new')">新建</a-button>
+        <a-button type="primary" @click="$router.push({ path: '/tasks/new', query: { from: 'list' } })">新建</a-button>
+        <a-button @click="$router.push({ path: '/periodic', query: { from: 'list' } })">🔁 周期任务</a-button>
         <a-button @click="cancelHost">关闭</a-button>
       </a-space>
     </div>
@@ -55,8 +56,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Message, Modal } from '@arco-design/web-vue'
 import {
   abandonTask,
@@ -67,8 +68,15 @@ import {
   selectTask,
 } from '@/api/client'
 
+const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
+
+watch(() => route.path, (newPath) => {
+  if (newPath === '/tasks') {
+    reload()
+  }
+})
 const tasks = ref([])
 const selectedId = ref(null)
 
@@ -97,12 +105,12 @@ async function onSelect() {
 
 function goProgress() {
   if (!current.value) return
-  router.push(`/tasks/${current.value.id}/progress`)
+  router.push({ path: `/tasks/${current.value.id}/progress`, query: { from: 'list' } })
 }
 
 function goEdit() {
   if (!current.value) return
-  router.push(`/tasks/${current.value.id}/edit`)
+  router.push({ path: `/tasks/${current.value.id}/edit`, query: { from: 'list' } })
 }
 
 async function onDone() {
