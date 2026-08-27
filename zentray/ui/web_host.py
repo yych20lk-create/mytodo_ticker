@@ -114,7 +114,8 @@ class VueDialog(QDialog):
         else:
             flags = (
                 Qt.FramelessWindowHint
-                | Qt.Dialog
+                | Qt.Window
+                | Qt.CustomizeWindowHint
                 | (Qt.WindowStaysOnTopHint if stay_on_top else Qt.Widget)
             )
         self.setWindowFlags(flags)
@@ -195,14 +196,17 @@ class VueDialog(QDialog):
                 pass
         self.view.load(QUrl(url))
         layout.addWidget(self.view)
-        center_dialog(self)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(10, lambda: center_dialog(self))
         logger.info("Vue dialog open: %s", url)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        from zentray.ui.dialog_utils import center_dialog
+        from PySide6.QtCore import QTimer
+        from zentray.ui.dialog_utils import center_dialog, enable_dialog_drag
 
-        center_dialog(self)
+        QTimer.singleShot(10, lambda: center_dialog(self))
+        enable_dialog_drag(self)
 
     def _on_bridge_result(self, payload: object) -> None:
         self.result_payload = payload

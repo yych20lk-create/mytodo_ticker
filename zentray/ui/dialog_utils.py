@@ -36,7 +36,9 @@ class DialogDragFilter(QObject):
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Show:
-            center_dialog(self.dialog)
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(10, lambda: center_dialog(self.dialog))
             self.install_recursive(self.dialog)
         elif event.type() == QEvent.ChildAdded:
             child = event.child()
@@ -105,7 +107,7 @@ def apply_dialog_chrome(
     控制页面关闭和大小改由页面内部按钮控制。
     """
     stays_on_top = bool(dialog.windowFlags() & Qt.WindowStaysOnTopHint)
-    flags = Qt.FramelessWindowHint | Qt.Dialog
+    flags = Qt.FramelessWindowHint | Qt.Window | Qt.CustomizeWindowHint
     if stays_on_top:
         flags |= Qt.WindowStaysOnTopHint
     dialog.setWindowFlags(flags)
@@ -118,7 +120,9 @@ def apply_dialog_chrome(
 
     dialog.setFixedSize(fixed_w, fixed_h)
     enable_dialog_drag(dialog)
-    center_dialog(dialog)
+    from PySide6.QtCore import QTimer
+
+    QTimer.singleShot(10, lambda: center_dialog(dialog))
 
 
 def fit_dialog(
